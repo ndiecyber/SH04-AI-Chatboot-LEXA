@@ -1,3 +1,6 @@
 groq
 python-dotenv
 streamlit
+sentence-transformers
+numpy
+pypdf

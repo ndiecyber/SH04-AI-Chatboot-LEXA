@@ -1,14 +1,27 @@
 import sys
-from llm import LexaChatbot
+from core.llm import LexaChatbot
+from core.rag import RAGPipeline
 
 def main():
-    print("=== Memulai Chatbot Customer Service Lexa ===")
+    # Set stdout encoding to UTF-8 to support emojis on Windows terminal
+    if hasattr(sys.stdout, 'reconfigure'):
+        try:
+            sys.stdout.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
+
+    print("=== Memulai Chatbot Customer Service Lexa (CLI) ===")
     try:
-        # Inisialisasi chatbot
-        bot = LexaChatbot()
+        # Inisialisasi RAG Pipeline bawaan
+        print("Memuat basis pengetahuan RAG...")
+        rag = RAGPipeline()
+        rag.load_or_build()
+        
+        # Inisialisasi chatbot dengan pipeline RAG
+        bot = LexaChatbot(rag_pipeline=rag)
         print("Lexa aktif! Ketik 'keluar' atau 'exit' untuk menyudahi obrolan.\n")
-    except ValueError as e:
-        print(f"Error: {e}")
+    except Exception as e:
+        print(f"Error saat inisialisasi: {e}")
         sys.exit(1)
 
     while True:
@@ -35,3 +48,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

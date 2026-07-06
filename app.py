@@ -1,6 +1,8 @@
 import streamlit as st
-from core.llm import LexaChatbot
-from core.rag import RAGPipeline
+import requests
+import uuid
+
+API_URL = "http://127.0.0.1:8000"
 
 # Konfigurasi Halaman
 st.set_page_config(
@@ -33,27 +35,30 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True) 
 
-# Inisialisasi RAG Pipeline dalam Session State
-if "rag" not in st.session_state:
-    try:
-        # Inisialisasi RAG dengan folder default
-        rag = RAGPipeline()
-        rag.load_or_build()
-        st.session_state.rag = rag
-    except Exception as e:
-        st.error(f"Gagal memuat RAG Pipeline: {e}")
-        st.session_state.rag = None
+# Cek Konektivitas Backend API
+try:
+    requests.get(API_URL, timeout=3)
+except Exception:
+    st.error("❌ Gagal terhubung ke API Server Backend LEXA (http://127.0.0.1:8000)")
+    st.info(
+        "Silakan jalankan server backend terlebih dahulu dengan perintah:\n\n"
+        "```powershell\n"
+        ".\\.venv\\Scripts\\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000\n"
+        "```"
+    )
+    st.stop()
 
-# Inisialisasi Chatbot dalam Session State agar history chat terjaga saat refresh
-if "chatbot" not in st.session_state:
+# Inisialisasi Sesi Chat
+if "session_id" not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
+    # Daftarkan sesi ke backend
     try:
-        # Chatbot akan membaca API key dari .env Anda secara otomatis
-        # Menyertakan RAG pipeline ke chatbot
-        st.session_state.chatbot = LexaChatbot(rag_pipeline=st.session_state.get("rag"))
+        requests.post(
+            f"{API_URL}/api/sessions/", 
+            json={"id": st.session_state.session_id, "title": "Percakapan Baru"}
+        )
     except Exception as e:
-        st.error(f"Gagal menginisialisasi Chatbot: {e}")
-        st.info("Silakan periksa apakah 'GROQ API KEY' sudah didefinisikan dengan benar di file `.env` Anda.")
-        st.stop()
+        st.error(f"Gagal membuat sesi di backend: {e}")
 
 # Sidebar untuk opsi tambahan
 with st.sidebar:
@@ -63,13 +68,20 @@ with st.sidebar:
     st.subheader("Manajemen Sesi")
     # Tombol Reset Chat
     if st.button("Reset Percakapan", use_container_width=True):
-        st.session_state.chatbot.reset_chat()
-        # Bersihkan memori dan muat kembali indeks dasar dari disk
-        if st.session_state.rag:
-            st.session_state.rag.load_or_build(force_rebuild=False)
-        if "indexed_files" in st.session_state:
-            st.session_state.indexed_files.clear()
-        st.rerun()
+        try:
+            # Hapus sesi lama di backend
+            requests.delete(f"{API_URL}/api/sessions/{st.session_state.session_id}")
+            # Buat sesi baru
+            st.session_state.session_id = str(uuid.uuid4())
+            requests.post(
+                f"{API_URL}/api/sessions/", 
+                json={"id": st.session_state.session_id, "title": "Percakapan Baru"}
+            )
+            if "indexed_files" in st.session_state:
+                st.session_state.indexed_files.clear()
+            st.rerun()
+        except Exception as e:
+            st.sidebar.error(f"Gagal mereset sesi: {e}")
 
     st.write("---")
     st.subheader("Unggah Dokumen Dinamis")
@@ -80,7 +92,7 @@ with st.sidebar:
         help="Maksimal ukuran 10MB"
     )
     
-    # Logika Pemrosesan Berkas Unggahan
+    # Logika Pemrosesan Berkas Unggahan via API
     if uploaded_file is not None:
         file_name = uploaded_file.name
         if "indexed_files" not in st.session_state:
@@ -88,37 +100,38 @@ with st.sidebar:
             
         if file_name not in st.session_state.indexed_files:
             try:
-                with st.spinner(f"Mengekstrak teks dari {file_name}..."):
-                    extracted_text = ""
-                    if file_name.endswith(".pdf"):
-                        import pypdf
-                        reader = pypdf.PdfReader(uploaded_file)
-                        for page in reader.pages:
-                            page_text = page.extract_text()
-                            if page_text:
-                                extracted_text += page_text + "\n"
-                    elif file_name.endswith(".txt"):
-                        extracted_text = uploaded_file.read().decode("utf-8")
-                        
-                    if extracted_text.strip():
-                        if st.session_state.rag:
-                            st.session_state.rag.add_temporary_document(file_name, extracted_text)
-                            st.session_state.indexed_files.add(file_name)
-                            st.sidebar.success(f"Berhasil mengindeks '{file_name}'!")
-                            st.rerun()
+                with st.spinner(f"Mengunggah dan mengindeks {file_name} di backend..."):
+                    # Kirim file ke backend temporary upload
+                    files = {"file": (uploaded_file.name, uploaded_file.getvalue(), uploaded_file.type)}
+                    response = requests.post(
+                        f"{API_URL}/api/documents/upload-temp/{st.session_state.session_id}",
+                        files=files
+                    )
+                    if response.status_code == 200:
+                        st.session_state.indexed_files.add(file_name)
+                        st.sidebar.success(f"Berhasil mengindeks '{file_name}'!")
+                        st.rerun()
                     else:
-                        st.sidebar.error("Gagal mengekstrak teks. Berkas mungkin kosong.")
+                        st.sidebar.error(f"Gagal mengindeks: {response.json().get('detail')}")
             except Exception as e:
                 st.sidebar.error(f"Gagal memproses berkas: {e}")
     else:
-        # Jika file uploader kosong tapi ada file di session_state, berarti file baru saja dihapus
+        # Jika file uploader kosong tapi ada file di session_state, bersihkan memori sesi
         if "indexed_files" in st.session_state and st.session_state.indexed_files:
-            if st.session_state.rag:
+            try:
                 with st.spinner("Membersihkan memori..."):
-                    st.session_state.rag.load_or_build(force_rebuild=False)
-            st.session_state.indexed_files.clear()
-            st.sidebar.info("Dokumen sementara dibersihkan.")
-            st.rerun()
+                    # Reset sesi di backend agar memori temporer dibersihkan
+                    requests.delete(f"{API_URL}/api/sessions/{st.session_state.session_id}")
+                    # Buat sesi baru dengan ID lama agar history chat ter-reset bersih
+                    requests.post(
+                        f"{API_URL}/api/sessions/", 
+                        json={"id": st.session_state.session_id, "title": "Percakapan Baru"}
+                    )
+                st.session_state.indexed_files.clear()
+                st.sidebar.info("Dokumen sementara dibersihkan.")
+                st.rerun()
+            except Exception as e:
+                st.sidebar.error(f"Gagal membersihkan dokumen sementara: {e}")
 
     # Tampilkan daftar dokumen dinamis aktif
     if "indexed_files" in st.session_state and st.session_state.indexed_files:
@@ -130,26 +143,36 @@ with st.sidebar:
     st.subheader("Basis Pengetahuan RAG")
     st.write("Jika Anda menambah atau memperbarui dokumen di folder `knowledge_base/`, klik tombol di bawah untuk menyegarkan indeks.")
     
-    # Tombol Rebuild RAG Index
+    # Tombol Rebuild RAG Index via API
     if st.button("Perbarui Indeks RAG Bawaan", use_container_width=True):
-        if st.session_state.rag:
-            with st.spinner("Membangun ulang indeks..."):
-                st.session_state.rag.build_index()
-            st.success("Indeks RAG berhasil diperbarui!")
-            st.rerun()
-        else:
-            st.warning("RAG Pipeline tidak aktif.")
+        try:
+            with st.spinner("Membangun ulang indeks di backend..."):
+                response = requests.post(f"{API_URL}/api/documents/rebuild-index")
+                if response.status_code == 200:
+                    st.success("Indeks RAG berhasil diperbarui!")
+                    st.rerun()
+                else:
+                    st.error("Gagal memperbarui indeks di backend.")
+        except Exception as e:
+            st.error(f"Koneksi gagal ke backend: {e}")
 
 
 # Header Utama
 st.title("💬 Lexa Customer Service")
-st.caption("Asisten Customer Service Interaktif dengan basis pengetahuan RAG (Groq API)")
+st.caption("Asisten Customer Service Interaktif dengan basis pengetahuan RAG (FastAPI + Groq API)")
 st.write("---")
 
-# Menampilkan riwayat chat yang tersimpan (melewati system prompt indeks ke-0)
-for message in st.session_state.chatbot.history:
-    if message["role"] == "system":
-        continue
+# Mengambil riwayat chat dari database backend
+history = []
+try:
+    history_resp = requests.get(f"{API_URL}/api/chat/{st.session_state.session_id}/history")
+    if history_resp.status_code == 200:
+        history = history_resp.json()
+except Exception as e:
+    st.error(f"Gagal memuat riwayat chat: {e}")
+
+# Menampilkan riwayat chat
+for message in history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
@@ -159,33 +182,44 @@ if prompt := st.chat_input("Ada yang bisa saya bantu hari ini?"):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Tampilkan respon bot secara streaming (real-time)
+    # Tampilkan respon bot secara streaming (real-time) dari REST API
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
         
         try:
-            # Memanggil generator stream dari llm.py
-            for chunk in st.session_state.chatbot.send_message_stream(prompt):
-                full_response += chunk
-                response_placeholder.markdown(full_response + "▌")
-            # Tampilkan respon akhir tanpa kursor ketik
-            response_placeholder.markdown(full_response)
+            # Request streaming ke FastAPI backend
+            resp = requests.post(
+                f"{API_URL}/api/chat/{st.session_state.session_id}/stream",
+                json={"message": prompt},
+                stream=True
+            )
+            
+            if resp.status_code == 200:
+                for chunk in resp.iter_content(chunk_size=None, decode_unicode=True):
+                    if chunk:
+                        full_response += chunk
+                        response_placeholder.markdown(full_response + "▌")
+                # Tampilkan respon akhir tanpa kursor ketik
+                response_placeholder.markdown(full_response)
+            else:
+                st.error("Gagal mendapatkan jawaban dari backend.")
             
             # Tampilkan referensi dokumen pendukung (jika ada hasil RAG)
-            refs = st.session_state.chatbot.last_references
-            if refs:
-                with st.expander("📚 Referensi Basis Pengetahuan"):
-                    for i, res in enumerate(refs):
-                        chunk = res["chunk"]
-                        score = res["score"]
-                        source = chunk["metadata"]["source"]
-                        doc_title = chunk["metadata"]["document_title"]
-                        st.markdown(f"**{i+1}. {doc_title}** (File: `{source}`, Skor Kemiripan: `{score:.2f}`)")
-                        st.caption(chunk["content"])
-                        if i < len(refs) - 1:
-                            st.write("---")
+            ref_resp = requests.get(f"{API_URL}/api/chat/{st.session_state.session_id}/last-references")
+            if ref_resp.status_code == 200:
+                refs = ref_resp.json()
+                if refs:
+                    with st.expander("📚 Referensi Basis Pengetahuan"):
+                        for i, res in enumerate(refs):
+                            chunk = res["chunk"]
+                            score = res["score"]
+                            source = chunk["metadata"]["source"]
+                            doc_title = chunk["metadata"]["document_title"]
+                            st.markdown(f"**{i+1}. {doc_title}** (File: `{source}`, Skor Kemiripan: `{score:.2f}`)")
+                            st.caption(chunk["content"])
+                            if i < len(refs) - 1:
+                                st.write("---")
                             
         except Exception as e:
             st.error(f"Terjadi kesalahan saat memproses jawaban: {e}")
-

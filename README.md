@@ -55,18 +55,28 @@ pip install -r requirements.txt
 
 ## 🎮 Cara Menjalankan
 
-### A. Tampilan Browser (Streamlit Web UI)
-Jalankan perintah berikut untuk membuka antarmuka chatbot interaktif:
-```powershell
-.\.venv\Scripts\streamlit.exe run app.py
-```
-Aplikasi web akan otomatis terbuka di browser Anda pada alamat `http://localhost:8501`.
+Aplikasi ini menggunakan arsitektur terdekopel (Decoupled Architecture) yang memisahkan **Backend API** dan **Frontend**. Pastikan Anda menjalankan Backend API terlebih dahulu.
 
-### B. Uji Coba Pencarian RAG (CLI)
-Untuk memverifikasi kecocokan pencarian dokumen dinamis secara terpisah di terminal:
+### 1. Jalankan Backend API (Wajib)
+Jalankan perintah berikut di terminal untuk mengaktifkan FastAPI server:
 ```powershell
-.\.venv\Scripts\python.exe llm_tests/scratch_pdf_test.py
+.\.venv\Scripts\python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --reload
 ```
+API docs (Swagger UI) dapat diakses di: `http://127.0.0.1:8000/docs`.
+
+### 2. Jalankan Frontend / Client
+Buka terminal baru, aktifkan virtual environment, lalu jalankan salah satu client berikut:
+
+* **A. Tampilan Browser (Streamlit Web UI)**:
+  ```powershell
+  .\.venv\Scripts\streamlit.exe run app.py
+  ```
+  Aplikasi web akan otomatis terbuka di browser Anda pada alamat `http://localhost:8501`.
+
+* **B. Tampilan Terminal (CLI)**:
+  ```powershell
+  .\.venv\Scripts\python.exe main.py
+  ```
 
 ---
 

@@ -4,19 +4,21 @@ from sqlalchemy.orm import Session
 from typing import List
 
 from backend.database import get_db
-from backend.schemas import ChatRequest, ChatResponse, MessageResponse
+from backend.schemas import ChatRequest, ChatResponse, MessageResponse, ReferenceItem
 from backend.services.chat_service import ChatService
 from backend.globals import base_pipeline
 from backend.models import Message as DBMessage, Session as DBSession
 from core.llm import LexaChatbot
 from backend.services.chat_service import get_session_pipeline
 import datetime
-import asyncio
 
 router = APIRouter(
     prefix="/api/chat",
     tags=["Chat"]
 )
+
+# Cache in-memory untuk referensi terakhir per sesi
+_last_references = {}
 
 # Helper to get ChatService
 def get_chat_service(db: Session = Depends(get_db)):
@@ -30,6 +32,8 @@ def send_chat_message(
 ):
     try:
         result = service.send_chat_message(session_id, chat_req.message)
+        # Simpan referensi ke cache
+        _last_references[session_id] = result["references"]
         return ChatResponse(
             response=result["response"],
             references=result["references"]
@@ -46,6 +50,11 @@ def get_chat_history(
     service: ChatService = Depends(get_chat_service)
 ):
     return service.get_session_history(session_id)
+
+@router.get("/{session_id}/last-references", response_model=List[ReferenceItem])
+def get_last_references(session_id: str):
+    """Ambil referensi dokumen RAG terakhir dari percakapan di sesi ini"""
+    return _last_references.get(session_id, [])
 
 @router.post("/{session_id}/stream")
 def send_chat_message_stream(
@@ -88,6 +97,9 @@ def send_chat_message_stream(
         try:
             # Panggil stream generator dari core.llm
             for chunk in chatbot.send_message_stream(chat_req.message):
+                # Simpan referensi ke cache global sesaat setelah generator mulai ( references terisi )
+                if chatbot.last_references:
+                    _last_references[session_id] = chatbot.last_references
                 full_response += chunk
                 yield chunk
                 

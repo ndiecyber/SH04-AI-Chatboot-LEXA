@@ -216,16 +216,31 @@ class RAGPipeline:
             
         all_chunks = []
         for file in os.listdir(self.db_dir):
-            if file.endswith((".md", ".txt")) and file != os.path.basename(self.index_path):
-                filepath = os.path.join(self.db_dir, file)
-                try:
+            if file == os.path.basename(self.index_path):
+                continue
+            filepath = os.path.join(self.db_dir, file)
+            try:
+                if file.endswith((".md", ".txt")):
                     with open(filepath, "r", encoding="utf-8") as f:
                         text = f.read()
-                    
                     chunks = self.chunk_markdown(text, file)
-                    all_chunks.extend(chunks)
-                except Exception as e:
-                    print(f"Gagal membaca file {file}: {e}")
+                elif file.endswith(".pdf"):
+                    import pypdf
+                    from io import BytesIO
+                    with open(filepath, "rb") as f:
+                        raw = f.read()
+                    reader = pypdf.PdfReader(BytesIO(raw))
+                    text = ""
+                    for page in reader.pages:
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text + chr(10)
+                    chunks = self.chunk_text(text, file)
+                else:
+                    continue
+                all_chunks.extend(chunks)
+            except Exception as e:
+                print(f"Gagal membaca file {file}: {e}")
                     
         if all_chunks:
             # Buat vector store baru

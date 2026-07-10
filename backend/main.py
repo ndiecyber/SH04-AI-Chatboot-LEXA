@@ -22,6 +22,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Optional API key guard (non-breaking: aktif hanya jika env LEXA_API_KEY diset)
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+LEXA_API_KEY = os.getenv("LEXA_API_KEY")
+if LEXA_API_KEY:
+    @app.middleware("http")
+    async def api_key_guard(request: Request, call_next):
+        # Biarkan endpoint publik (root + dokumentasi) tetap terbuka
+        if request.url.path in ("/", "/docs", "/openapi.json", "/redoc"):
+            return await call_next(request)
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {LEXA_API_KEY}":
+            return JSONResponse(status_code=401, content={"detail": "Invalid or missing API key"})
+        return await call_next(request)
+
 # Mount routers
 app.include_router(sessions.router)
 app.include_router(chat.router)
@@ -49,8 +65,8 @@ def sync_database_documents():
     db = SessionLocal()
     try:
         # Dapatkan list file dari disk
-        disk_files = [f for f in os.listdir(KNOWLEDGE_BASE_DIR) 
-                      if f.endswith((".md", ".txt")) and f != os.path.basename(INDEX_PATH)]
+        disk_files = [f for f in os.listdir(KNOWLEDGE_BASE_DIR)
+                      if f.endswith((".md", ".txt", ".pdf")) and f != os.path.basename(INDEX_PATH)]
         
         # Dapatkan list file dari DB
         db_docs = db.query(DBDocument).all()
@@ -66,17 +82,31 @@ def sync_database_documents():
         for file in disk_files:
             if file not in db_filenames:
                 file_path = os.path.join(KNOWLEDGE_BASE_DIR, file)
-                file_type = "pdf" if file.endswith(".pdf") else "txt"
-                
-                # Baca konten untuk menghitung chunk count secara kasar
+
+                # Ekstrak teks sesuai tipe file untuk menghitung chunk count
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                    chunks = base_pipeline.chunk_text(content, file)
+                    if file.endswith(".pdf"):
+                        import pypdf
+                        from io import BytesIO
+                        with open(file_path, "rb") as fh:
+                            raw = fh.read()
+                        reader = pypdf.PdfReader(BytesIO(raw))
+                        text = ""
+                        for page in reader.pages:
+                            pt = page.extract_text()
+                            if pt:
+                                text += pt + chr(10)
+                        file_type = "pdf"
+                    else:
+                        with open(file_path, "r", encoding="utf-8") as fh:
+                            text = fh.read()
+                        file_type = "md" if file.endswith(".md") else "txt"
+                    chunks = base_pipeline.chunk_text(text, file)
                     chunk_count = len(chunks)
                 except Exception:
                     chunk_count = 0
-                    
+                    file_type = "pdf" if file.endswith(".pdf") else ("md" if file.endswith(".md") else "txt")
+
                 new_doc = DBDocument(
                     filename=file,
                     file_type=file_type,

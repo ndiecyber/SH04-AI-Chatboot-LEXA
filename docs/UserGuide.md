@@ -1,183 +1,228 @@
-# User Guide — Lexa Customer Service Chatbot
+# User Guide v2.0 — Lexa Customer Service Chatbot
 
 **Project:** SH04-AI-Chatbot-LEXA  
-**Version:** 1.0.0  
-**Last Updated:** 2025-07-01
+**Version:** 2.0.0  
+**Last Updated:** 2026-07-10  
+**Changelog:** Panduan diperbarui untuk arsitektur baru (FastAPI backend + RAG + upload dokumen)
 
 ---
 
-## Welcome to Lexa 💬
+## Selamat Datang di Lexa v2.0 💬
 
-Lexa adalah asisten customer service berbasis AI yang dirancang untuk menjawab pertanyaan pelanggan dengan ramah, sopan, dan profesional. Lexa menggunakan teknologi Groq Cloud API untuk memberikan respons cepat dan alami.
+Lexa adalah asisten customer service berbasis AI yang kini hadir dengan kemampuan yang jauh lebih canggih:
 
-Lexa tersedia dalam dua mode:
-- **Mode Browser (Streamlit)** — Antarmuka chat modern di browser Anda
-- **Mode Terminal (CLI)** — Percakapan langsung dari terminal/command prompt
+| Fitur | v1.0 | v2.0 |
+|-------|------|------|
+| Chat AI (Groq) | ✅ | ✅ |
+| Riwayat Chat Permanen | ❌ | ✅ SQLite |
+| Basis Pengetahuan (RAG) | ❌ | ✅ |
+| Upload Dokumen PDF | ❌ | ✅ |
+| Referensi Sumber Jawaban | ❌ | ✅ |
+| Multi-sesi | ❌ | ✅ |
+| REST API Backend | ❌ | ✅ FastAPI |
 
 ---
 
-## Getting Started
+## Cara Menjalankan Aplikasi
 
-### Prerequisites
+### ⚠️ Penting: Backend Harus Jalan Lebih Dulu
 
-Sebelum menggunakan Lexa, pastikan Anda telah:
+Lexa v2.0 terdiri dari dua komponen yang harus dijalankan secara terpisah:
 
-- [ ] Menginstal Python 3.9 atau lebih baru
-- [ ] Memiliki Groq API Key (gratis di [console.groq.com](https://console.groq.com))
-- [ ] Menginstal semua dependensi (`pip install -r requirements.txt`)
-- [ ] Mengatur file `.env` dengan API Key Anda
+**Terminal 1 — Jalankan Backend:**
+```bash
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
+```
 
-Jika Anda belum melakukan langkah-langkah di atas, lihat **Installation Guide** terlebih dahulu.
+Tunggu hingga muncul:
+```
+RAG basis pengetahuan dimuat!
+INFO: Uvicorn running on http://127.0.0.1:8000
+```
+
+**Terminal 2 — Jalankan Frontend:**
+```bash
+streamlit run app.py
+```
+
+Browser otomatis terbuka di `http://localhost:8501`.
+
+**Opsional — Terminal 3 (CLI):**
+```bash
+python main.py
+```
 
 ---
 
 ## Mode 1: Browser Interface (Streamlit)
 
-### Memulai Lexa di Browser
-
-```bash
-streamlit run app.py
-```
-
-Browser akan otomatis terbuka di `http://localhost:8501`.
-
 ### Tampilan Antarmuka
 
 ```
-┌──────────────────────────────────────────────────────┐
-│  Lexa CS Control Panel    │  💬 Lexa Customer Service  │
-│  ─────────────────────    │  ─────────────────────     │
-│  🤖                       │                            │
-│                           │  [User] Halo Lexa          │
-│  Gunakan tombol di bawah  │  [Lexa] Halo! Ada yang...  │
-│  untuk menyetel ulang     │                            │
-│  percakapan.              │  [User] Berapa harga...    │
-│                           │  [Lexa] Untuk informasi..  │
-│  [Reset Percakapan]       │                            │
-│                           │  ┌─ Ada yang bisa saya ─┐  │
-│                           │  │    bantu hari ini?    │  │
-│                           │  └──────────────────────┘  │
-└──────────────────────────────────────────────────────┘
+┌─────────────────┬─────────────────────────────────────────┐
+│ SIDEBAR         │  💬 Lexa Customer Service                │
+│─────────────────│  ─────────────────────────────────────  │
+│ 🤖 Lexa         │                                          │
+│ CS Control Panel│  [User] Halo Lexa                       │
+│                 │  [Lexa] Halo! Ada yang bisa saya bantu? │
+│ Upload Dokumen  │                                          │
+│ [📄 pilih file] │  [User] Berapa harga paket Pro?         │
+│                 │  [Lexa] Harga Paket Pro adalah Rp...    │
+│ Dokumen Aktif:  │  ▼ 📚 Referensi Basis Pengetahuan       │
+│ • warranty.pdf  │    1. pricing.md | Score: 0.74          │
+│                 │                                          │
+│ [Rebuild Index] │  ┌─ Ada yang bisa saya bantu hari ini? ─┐│
+│ [Reset Chat]    │  └────────────────────────────────────┘ │
+└─────────────────┴─────────────────────────────────────────┘
 ```
-
-### Cara Menggunakan
-
-1. **Ketik pesan** di kotak input di bagian bawah halaman.
-2. **Tekan Enter** atau klik tombol kirim untuk mengirim pesan.
-3. **Tunggu respons** — Lexa akan menjawab secara streaming (teks muncul bertahap).
-4. **Lanjutkan percakapan** — Lexa mengingat konteks percakapan selama sesi berlangsung.
-
-### Sidebar: Lexa CS Control Panel
-
-| Elemen | Fungsi |
-|--------|--------|
-| 🤖 Icon | Identitas visual Lexa |
-| Deskripsi | Panduan singkat penggunaan |
-| Tombol "Reset Percakapan" | Menghapus semua riwayat chat dan memulai sesi baru |
-
-> ⚠️ **Peringatan:** Klik tombol Reset akan menghapus **seluruh riwayat percakapan** dan tidak dapat dibatalkan.
-
-### Tips Penggunaan Browser
-
-- Riwayat percakapan **disimpan selama sesi berlangsung** (tab browser terbuka).
-- Menutup tab atau me-refresh halaman akan **menghapus riwayat percakapan**.
-- Anda dapat membuka **beberapa tab** — setiap tab memiliki sesi percakapan sendiri.
 
 ---
 
-## Mode 2: Terminal Interface (CLI)
+### Cara Chat
 
-### Memulai Lexa di Terminal
+1. Ketik pesan di kotak input bawah → tekan **Enter**.
+2. Lexa menjawab secara **streaming** (teks muncul bertahap).
+3. Jika ada dokumen relevan, **referensi sumber** muncul di bawah jawaban.
+4. Riwayat percakapan **tersimpan permanen** — tidak hilang saat refresh.
+
+---
+
+### Fitur Upload Dokumen (Basis Pengetahuan Sementara)
+
+Upload dokumen pribadi agar Lexa dapat menjawab berdasarkan isinya:
+
+1. Klik **"Pilih file"** di sidebar.
+2. Pilih file **PDF atau TXT** (maks. 10MB).
+3. Tunggu proses indexing — muncul pesan sukses hijau.
+4. Dokumen langsung bisa digunakan — tanyakan konten dokumen tersebut ke Lexa.
+
+**Catatan:**
+- Dokumen hanya aktif untuk sesi ini (bukan permanen).
+- Dokumen dari sesi lain tidak terlihat di sesi Anda.
+- Jika file uploader dikosongkan, dokumen sementara akan dihapus.
+
+**Format yang didukung:** `.pdf`, `.txt`, `.md`
+
+---
+
+### Tombol Sidebar
+
+| Tombol | Fungsi |
+|--------|--------|
+| 🔄 **Rebuild Basis Pengetahuan** | Update RAG index setelah admin menambahkan dokumen baru ke server |
+| 🗑️ **Reset Percakapan** | Hapus semua riwayat chat dan mulai sesi baru |
+
+> ⚠️ **Reset tidak dapat dibatalkan.** Seluruh riwayat percakapan akan dihapus permanen.
+
+---
+
+### Referensi Sumber Jawaban
+
+Ketika Lexa menjawab berdasarkan dokumen basis pengetahuan, akan muncul expander:
+
+```
+▼ 📚 Referensi Basis Pengetahuan
+
+1. pricing.md (Paket Harga) | Relevansi: 0.74
+   "## Paket Pro\nHarga: Rp 299.000/bulan, mencakup 10 pengguna..."
+
+2. features.md (Fitur Utama) | Relevansi: 0.61
+   "Fitur premium meliputi: laporan analitik, integrasi API..."
+```
+
+Skor relevansi berkisar 0–1. Semakin tinggi skor, semakin relevan chunk tersebut dengan pertanyaan Anda.
+
+---
+
+## Mode 2: Terminal/CLI Interface
 
 ```bash
 python main.py
 ```
 
-### Tampilan Terminal
-
 ```
-=== Memulai Chatbot Customer Service Lexa ===
+=== Memulai Chatbot Customer Service Lexa (CLI) ===
+Sesi chat aktif (ID: cli-a1b2c3d4)
 Lexa aktif! Ketik 'keluar' atau 'exit' untuk menyudahi obrolan.
 
-Pelanggan: Halo, saya butuh bantuan
-Lexa: Halo! Selamat datang. Saya Lexa, siap membantu Anda. Ada yang bisa saya bantu?
-
-Pelanggan: Bagaimana cara mengembalikan produk?
-Lexa: Tentu! Untuk mengembalikan produk, Anda perlu...
+Pelanggan: Halo Lexa
+Lexa: Halo! Selamat datang di layanan kami. Ada yang bisa saya bantu?
 
 Pelanggan: keluar
 Lexa: Terima kasih telah menghubungi kami. Semoga hari Anda menyenangkan!
 ```
 
-### Perintah CLI
-
 | Perintah | Fungsi |
 |----------|--------|
-| Ketik pesan → Enter | Kirim pesan ke Lexa |
-| `keluar` | Mengakhiri percakapan dengan pesan perpisahan |
-| `exit` | Sama dengan `keluar` |
-| `Ctrl+C` | Menghentikan program secara paksa |
+| Ketik pesan → Enter | Kirim ke Lexa |
+| `keluar` atau `exit` | Akhiri percakapan |
+| `Ctrl+C` | Paksa berhenti |
 
-### Tips Penggunaan CLI
+---
 
-- Tekan Enter pada input kosong akan **dilewati** — tidak ada pesan yang dikirim.
-- Riwayat percakapan **hilang** saat program ditutup.
-- Respons ditampilkan secara **streaming** (muncul bertahap, terasa lebih natural).
+## Mode 3: API Langsung (Untuk Developer)
+
+Backend FastAPI menyediakan Swagger UI di:
+```
+http://127.0.0.1:8000/docs
+```
+
+Endpoint utama:
+```
+POST /api/sessions/                        → Buat sesi baru
+GET  /api/chat/{session_id}/history        → Lihat riwayat
+POST /api/chat/{session_id}/stream         → Chat (streaming)
+POST /api/documents/upload-temp/{sid}      → Upload dokumen sementara
+```
 
 ---
 
 ## Pertanyaan yang Bisa Ditanyakan ke Lexa
 
-Lexa dirancang sebagai asisten customer service. Berikut contoh pertanyaan yang dapat ditangani:
+**✅ Optimal:**
+- Pertanyaan tentang konten dokumen yang diupload
+- Pertanyaan tentang layanan customer service
+- Pertanyaan tentang kebijakan, fitur, harga (jika ada di knowledge_base)
+- Pertanyaan prosedural: cara refund, cara komplain, dll.
 
-**✅ Cocok untuk Lexa:**
-- "Bagaimana cara mengembalikan produk yang rusak?"
-- "Jam berapa customer service bisa dihubungi?"
-- "Saya ingin tahu status pesanan saya"
-- "Apa kebijakan refund kalian?"
-- "Produk saya tidak sampai, apa yang harus saya lakukan?"
-
-**⚠️ Tidak Optimal untuk Lexa:**
-- Pertanyaan spesifik tentang produk (harga, stok) — Lexa tidak memiliki akses database
-- Permintaan di luar konteks layanan pelanggan
-- Instruksi pemrograman atau teknis non-CS
+**⚠️ Kurang Optimal:**
+- Pertanyaan data real-time (harga saham, berita hari ini)
+- Pertanyaan di luar konteks layanan pelanggan
+- Pertanyaan teknis pemrograman
 
 ---
 
-## Frequently Asked Questions (FAQ)
+## FAQ v2.0
 
-**Q: Apakah Lexa menyimpan percakapan saya?**  
-A: Tidak. Riwayat percakapan hanya disimpan di memori selama sesi berlangsung dan tidak ditulis ke disk atau database. Saat sesi berakhir, semua data percakapan hilang.
+**Q: Apakah riwayat chat saya disimpan?**  
+A: Ya, di v2.0 riwayat disimpan permanen di database SQLite. Riwayat tetap ada setelah refresh atau restart browser — kecuali Anda klik Reset.
 
-**Q: Apakah percakapan saya aman?**  
-A: Pesan Anda dikirimkan ke server Groq Cloud untuk diproses. Harap jangan membagikan informasi sensitif seperti nomor kartu kredit, kata sandi, atau data pribadi yang sangat sensitif.
+**Q: Apakah dokumen yang saya upload disimpan permanen?**  
+A: Tidak. Dokumen yang diupload via sidebar hanya aktif untuk sesi saat ini (in-memory). Jika sesi di-reset atau server restart, dokumen tersebut hilang. Dokumen permanen harus ditambahkan oleh admin ke folder `knowledge_base/`.
 
-**Q: Kenapa Lexa terkadang lambat merespons?**  
-A: Kecepatan respons bergantung pada koneksi internet dan beban server Groq. Lexa menggunakan streaming sehingga teks muncul bertahap — ini bukan hang atau error.
+**Q: Kenapa ada dua terminal yang harus dibuka?**  
+A: v2.0 menggunakan arsitektur terpisah — backend FastAPI dan frontend Streamlit adalah dua proses berbeda. Backend menangani logika, database, dan AI. Frontend menampilkan UI.
 
-**Q: Apa yang terjadi jika saya tekan Reset?**  
-A: Seluruh riwayat percakapan dihapus dan Lexa kembali ke kondisi awal. Ini tidak bisa dibatalkan.
+**Q: Kenapa jawaban Lexa menyebut sumber dokumen?**  
+A: Fitur RAG (Retrieval-Augmented Generation) memungkinkan Lexa mencari informasi relevan dari basis pengetahuan sebelum menjawab, sehingga jawaban lebih akurat dan dapat diverifikasi.
 
-**Q: Bisakah saya mengganti model AI yang digunakan?**  
-A: Ya, jika Anda developer. Ubah parameter `model` saat inisialisasi `LexaChatbot()`:
-```python
-bot = LexaChatbot(model="llama-3.1-8b-instant")
-```
-Model yang tersedia dapat dilihat di [Groq Console](https://console.groq.com).
+**Q: Apakah percakapan saya dikirim ke server luar?**  
+A: Ya. Pesan dikirim ke Groq Cloud API untuk diproses oleh model AI. Jangan bagikan informasi sensitif seperti kata sandi atau nomor kartu kredit.
 
-**Q: Apa yang dilakukan Lexa jika tidak mengerti pertanyaan saya?**  
-A: Lexa akan meminta klarifikasi dengan sopan. Coba ubah kalimat pertanyaan Anda atau tambahkan detail lebih lanjut.
+**Q: Apa yang terjadi jika Lexa menjawab berdasarkan informasi yang salah?**  
+A: Periksa referensi sumber yang ditampilkan. Jika referensi tidak relevan atau tidak ada, jawaban Lexa berdasarkan pengetahuan umum model — verifikasi ke sumber resmi untuk informasi penting.
 
 ---
 
 ## Troubleshooting
 
-| Masalah | Kemungkinan Penyebab | Solusi |
-|---------|----------------------|--------|
-| "API Key Groq tidak ditemukan!" | `.env` tidak ada atau key salah | Buat/periksa file `.env` |
-| Respons sangat lambat | Koneksi internet lemah | Periksa koneksi; coba lagi |
-| "Gagal memproses request" | API error sementara | Tunggu beberapa detik; coba lagi |
-| Halaman Streamlit tidak terbuka | Port 8501 diblokir | Jalankan `streamlit run app.py --server.port 8502` |
-| Error saat `pip install` | Python versi lama | Update ke Python 3.9+ |
+| Masalah | Penyebab | Solusi |
+|---------|----------|--------|
+| "Backend tidak tersedia" di Streamlit | Backend belum jalan | Jalankan `uvicorn backend.main:app` dulu |
+| `ModuleNotFoundError: requests` | Dependency kurang | `pip install requests` |
+| Halaman load sangat lama pertama kali | Download model AI ~80MB | Tunggu hingga selesai (1x saja) |
+| Upload gagal "File terlalu besar" | File > 10MB | Kompres atau split file |
+| Riwayat hilang setelah clear file | Bug aktif (Bug-010) | Jangan clear uploader jika ingin simpan riwayat |
+| Error "API Key tidak ditemukan" | `.env` tidak ada/salah | Cek file `.env` |
 
 Untuk panduan instalasi lengkap, lihat [Installation Guide](InstallationGuide.md).

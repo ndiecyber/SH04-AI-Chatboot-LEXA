@@ -1,361 +1,191 @@
-# API Testing Report — SH04-AI-Chatbot-LEXA
+# API Testing Report v2.0 — SH04-AI-Chatbot-LEXA
 
-**Project:** SH04-AI-Chatbot-LEXA  
-**Version:** 1.0.0  
-**Tester:** QA Engineering Team  
-**Date:** 2025-07-01  
-**API Provider:** Groq Cloud (`https://api.groq.com`)  
-**Model:** `openai/gpt-oss-120b`
+**Project:** SH04-AI-Chatbot-LEXA | **Version:** 2.0.0 | **Date:** 2026-07-10
 
 ---
 
 ## 1. Overview
 
-This document covers API integration testing for the Lexa chatbot's connection to the Groq Cloud API. Tests include valid and invalid authentication, missing credentials, timeout conditions, connection loss, rate limit handling, and streaming behavior.
+Pengujian API mencakup semua endpoint FastAPI: `/api/sessions`, `/api/chat`, `/api/documents`. Termasuk verifikasi CORS fix, API key guard, streaming endpoint, dan integrasi Groq API.
 
 ---
 
-## 2. API Architecture Review
+## 2. Endpoint Inventory
 
-```
-User Input
-    │
-    ▼
-LexaChatbot.__init__()
-    │─── Reads GROQ_API_KEY from os.getenv()
-    │─── Initializes groq.Groq(api_key=self.api_key)
-    │
-    ▼
-send_message() / send_message_stream()
-    │─── Appends user message to self.history
-    │─── Calls self.client.chat.completions.create(
-    │         messages=self.history,
-    │         model=self.model,
-    │         [stream=True]
-    │    )
-    │─── On success: appends reply to history
-    │─── On error: pops user message (rollback), raises RuntimeError
-    ▼
-Response returned to caller (CLI / Streamlit)
-```
+| Method | Endpoint | Tag | Fungsi |
+|--------|----------|-----|--------|
+| GET | `/` | Root | Health check |
+| GET | `/docs` | Docs | Swagger UI |
+| POST | `/api/sessions/` | Sessions | Buat sesi |
+| GET | `/api/sessions/` | Sessions | List sesi |
+| DELETE | `/api/sessions/{id}` | Sessions | Hapus sesi |
+| POST | `/api/chat/{id}` | Chat | Kirim pesan (sync) |
+| GET | `/api/chat/{id}/history` | Chat | Ambil riwayat |
+| POST | `/api/chat/{id}/stream` | Chat | Kirim pesan (streaming) |
+| GET | `/api/chat/{id}/last-references` | Chat | Ambil referensi RAG terakhir |
+| GET | `/api/documents/` | Documents | List dokumen global |
+| POST | `/api/documents/upload` | Documents | Upload dokumen global |
+| DELETE | `/api/documents/{id}` | Documents | Hapus dokumen |
+| POST | `/api/documents/rebuild-index` | Documents | Rebuild RAG index |
+| POST | `/api/documents/upload-temp/{sid}` | Documents | Upload dokumen sementara |
 
 ---
 
 ## 3. Test Results
 
+### AT2-001 — Sessions CRUD Lengkap
+
+| Step | Request | Expected | Actual | Status |
+|------|---------|----------|--------|--------|
+| Create | POST /api/sessions/ `{"id":"s1","title":"Test"}` | 201 + SessionResponse | ✅ 201 | PASS |
+| List | GET /api/sessions/ | 200 + list | ✅ 200 dengan s1 | PASS |
+| Delete | DELETE /api/sessions/s1 | 204 | ✅ 204 | PASS |
+| Delete nonexistent | DELETE /api/sessions/s1 | 404 | ✅ 404 | PASS |
+
 ---
 
-### AT-001 — Valid API Key — Standard Request
+### AT2-002 — Chat Endpoint (Sync)
 
-**Scenario:** Send a message with a valid `GROQ_API_KEY`.
-
-**Config:**
 ```
-GROQ_API_KEY=gsk_<valid_key>
-Model: openai/gpt-oss-120b
-```
+Request: POST /api/chat/s1
+Body: {"message": "Apa layanan yang tersedia?"}
 
-**Request (simulated):**
-```python
-bot = LexaChatbot()
-response = bot.send_message("Apa layanan yang tersedia?")
-```
+Response: 200 OK
+{
+  "response": "Halo! Kami menyediakan layanan customer support...",
+  "references": []
+}
 
-**Expected Response:**
-- HTTP 200 from Groq API
-- `chat_completion.choices[0].message.content` returns non-empty string
-- History updated with user + assistant messages
-
-**Actual Result:**
-```
-Status: 200 OK
-Response: "Halo! Kami menyediakan berbagai layanan pelanggan termasuk..."
-History length: 3 (system + user + assistant)
+DB check: messages table → 2 rows (user + assistant) untuk session s1
 ```
 
 **Result:** ✅ **PASS**
 
 ---
 
-### AT-002 — Invalid API Key
+### AT2-003 — Chat Endpoint (Streaming)
 
-**Scenario:** API key is a malformed or wrong string.
-
-**Config:**
 ```
-GROQ_API_KEY=gsk_thisisaninvalidkeyXXXXXXXX
-```
+Request: POST /api/chat/s1/stream
+Body: {"message": "Ceritakan layanan premium"}
+Headers: Accept: text/event-stream
 
-**Request:**
-```python
-bot = LexaChatbot()  # succeeds (no validation at init)
-bot.send_message("Hello")  # fails here
-```
+Response: 200 OK, Content-Type: text/event-stream
+Chunks received: "Layanan " → "premium " → "kami " → "mencakup " → ...
+[Stream ends]
 
-**Expected:**
-- Groq SDK raises `AuthenticationError` (HTTP 401)
-- `llm.py` catches it as generic `Exception`
-- `self.history.pop()` removes orphaned user message
-- `RuntimeError` raised with message: `"Gagal memproses request ke Groq API: ..."`
-
-**Actual Result:**
-```
-groq.AuthenticationError: 401 Invalid API Key
-→ Wrapped: RuntimeError("Gagal memproses request ke Groq API: 401 Invalid API Key")
-→ History rolled back successfully (no orphaned entry)
+DB check: assistant message tersimpan setelah stream selesai
 ```
 
-**Tester Note:** Error message exposes the raw Groq error string. Consider sanitizing for production UI.  
-**Result:** ✅ **PASS**
+**Catatan Teknis:** Endpoint menggunakan format token mentah, bukan SSE standar (`data:`/`[DONE]`). Client Streamlit menangani ini dengan baik, tapi client non-Streamlit perlu adaptasi.
+
+**Result:** ✅ **PASS** *(non-standard SSE format — noted)*
 
 ---
 
-### AT-003 — Missing API Key (No .env)
+### AT2-004 — CORS Fix Verification
 
-**Scenario:** `.env` file does not exist or `GROQ_API_KEY` not defined.
-
-**Config:**
 ```
-.env file: absent or GROQ_API_KEY not set
-```
+Sebelumnya (v1.0): allow_origins=["*"] + allow_credentials=True → browser reject
+Sekarang (v2.0):   allow_origins=["http://localhost:8501", "http://127.0.0.1:8501"]
 
-**Request:**
-```python
-bot = LexaChatbot()
+Test dari http://localhost:8501: → Preflight CORS OK ✅
+Test dari http://evil.com:      → CORS blocked by browser ✅
 ```
 
-**Expected:**
-- `os.getenv("GROQ_API_KEY")` returns `None`
-- `os.getenv("GROQ API KEY")` also returns `None`
-- `ValueError` raised during `__init__`
+**Result:** ✅ **PASS** *(Regression fix confirmed)*
 
-**Actual Result:**
-```
-ValueError: API Key Groq tidak ditemukan! Pastikan variabel 'GROQ_API_KEY' atau 
-            'GROQ API KEY' sudah didefinisikan dengan benar di file .env Anda.
-```
+---
 
-**CLI Behavior:**
-```
-Error: API Key Groq tidak ditemukan!...
-[sys.exit(1) called — clean exit]
-```
+### AT2-005 — LEXA_API_KEY Guard
 
-**Streamlit Behavior:**
 ```
-st.error("Gagal menginisialisasi Chatbot: API Key Groq tidak ditemukan!...")
-st.info("Silakan periksa apakah 'GROQ API KEY' sudah didefinisikan...")
-st.stop()
+Scenario A — LEXA_API_KEY tidak diset:
+  Semua request → diterima ✅ (non-breaking, dev mode)
+
+Scenario B — LEXA_API_KEY=mysecret123 diset:
+  GET /             → 200 ✅ (public endpoint)
+  GET /docs         → 200 ✅ (public endpoint)
+  POST /api/chat/s1 (tanpa header) → 401 ✅
+  POST /api/chat/s1 (Bearer mysecret123) → 200 ✅
+  POST /api/chat/s1 (Bearer wrongkey) → 401 ✅
 ```
 
 **Result:** ✅ **PASS**
 
 ---
 
-### AT-004 — Expired / Revoked API Key
+### AT2-006 — Document Upload Flow
 
-**Scenario:** API key was valid but has been revoked in the Groq console.
-
-**Config:**
 ```
-GROQ_API_KEY=gsk_<previously_valid_now_revoked>
+1. POST /api/documents/upload (PDF valid, 50KB)
+   → 201 Created
+   → File saved: knowledge_base/doc.pdf
+   → DB: documents table row inserted (file_type: "pdf", chunk_count: 12)
+   → RAG rebuild triggered
+   → Session pipelines cleared
+
+2. GET /api/documents/
+   → 200, list includes doc.pdf ✅
+
+3. DELETE /api/documents/1
+   → 204
+   → File removed from disk ✅
+   → DB row deleted ✅
+   → RAG rebuild triggered ✅
 ```
 
-**Expected:**
-- Groq API returns HTTP 401 or 403
-- Same handling as AT-002 (AuthenticationError → RuntimeError)
-
-**Actual Result:**
-```
-groq.AuthenticationError: 401 Unauthorized - API key has been revoked
-→ RuntimeError raised
-→ History rolled back
-```
-
-**Tester Note:** No distinction between "wrong key" and "revoked key" in the error message. Both surface as generic auth error. For improved UX, consider detecting expiry specifically.  
 **Result:** ✅ **PASS**
 
 ---
 
-### AT-005 — API Timeout / Network Unreachable
+### AT2-007 — Upload Temp Document + Query
 
-**Scenario:** Outbound traffic to `api.groq.com` is blocked or times out.
-
-**Simulation:** Network firewall rule added to block `api.groq.com`.
-
-**Expected:**
-- Groq SDK raises `groq.APIConnectionError` or `httpx.ConnectTimeout`
-- Caught as generic `Exception` in `llm.py`
-- History rolled back; `RuntimeError` raised
-
-**Actual Result:**
 ```
-httpx.ConnectTimeout: Connect timeout to api.groq.com:443
-→ RuntimeError("Gagal memproses stream request ke Groq API: Connect timeout...")
-→ History rolled back: self.history.pop()
+1. POST /api/documents/upload-temp/s1 (file: warranty.pdf)
+   → 200: {"status":"success","message":"Berhasil mengindeks 'warranty.pdf'"}
+
+2. POST /api/chat/s1/stream {"message": "Berapa lama garansi produk?"}
+   → References: [{chunk: {content:"Garansi 2 tahun..."}, score: 0.78}] ✅
+
+3. POST /api/chat/s2/stream {"message": "Berapa lama garansi produk?"} (sesi lain)
+   → References: [] (isolasi sesi terkonfirmasi) ✅
 ```
 
-**Tester Note:** No retry mechanism implemented. A single network hiccup fails the request permanently. Recommend adding exponential backoff retry (1-3 attempts).  
-**Result:** ✅ **PASS** *(retry logic recommended)*
-
----
-
-### AT-006 — Connection Loss Mid-Stream
-
-**Scenario:** Network disconnects after streaming has started (mid-response).
-
-**Simulation:** Network disabled after first 3 tokens received.
-
-**Expected:**
-- Generator raises exception mid-iteration
-- `except Exception as e` in `send_message_stream` triggers
-- `self.history.pop()` removes user message
-
-**Actual Result:**
-```
-[3 tokens received: "Tentu, ", "saya ", "akan..."]
-→ httpx.RemoteProtocolError: Server disconnected
-→ RuntimeError raised
-→ History pop() called (user message removed)
-```
-
-**Critical Finding:** The partial response (`full_reply`) that was accumulated is **discarded**. This is correct behavior for data integrity but the user receives no partial response indication.
-
-**Tester Note:** Partial responses are lost on mid-stream failure. Consider implementing a "partial response received" indicator in the UI.  
-**Result:** ✅ **PASS** *(UX improvement possible)*
-
----
-
-### AT-007 — Rate Limit Exceeded
-
-**Scenario:** Send rapid requests exceeding Groq free-tier rate limit.
-
-**Simulation:** 25 rapid API calls sent in quick succession.
-
-**Expected:**
-- After limit exceeded, Groq returns HTTP 429 `RateLimitError`
-- Error caught; RuntimeError raised
-- No application crash
-
-**Actual Result:**
-```
-Request 1–18: 200 OK
-Request 19: groq.RateLimitError: 429 Rate limit exceeded
-→ RuntimeError("Gagal memproses request ke Groq API: Rate limit exceeded")
-```
-
-**CLI Behavior:**
-```
-Terjadi kesalahan: Gagal memproses request ke Groq API: Rate limit exceeded
-[Loop continues — user can try again]
-```
-
-**Critical Finding:** ❌ No rate limit awareness, user-facing message, or cooldown timer. The error message is technical, not user-friendly. No retry-after header is extracted from the response.
-
-**Tester Note:** This is documented as **Bug-004**. Application should detect 429 responses and display a helpful message like "Sedang ramai, coba lagi dalam beberapa detik."  
-**Result:** ⚠️ **PARTIAL PASS**
-
----
-
-### AT-008 — Invalid Model Name
-
-**Scenario:** Chatbot initialized with a non-existent model name.
-
-**Config:**
-```python
-bot = LexaChatbot(model="nonexistent-model-xyz-99")
-bot.send_message("Halo")
-```
-
-**Expected:**
-- Groq API returns HTTP 400 or 404
-- `RuntimeError` raised with descriptive message
-
-**Actual Result:**
-```
-groq.BadRequestError: 400 Model 'nonexistent-model-xyz-99' does not exist
-→ RuntimeError("Gagal memproses request ke Groq API: 400 Model does not exist")
-→ History rolled back
-```
-
-**Tester Note:** Model name is hardcoded as default `"openai/gpt-oss-120b"`. This is an unusual namespace for Groq. If Groq renames or removes this model, the app silently breaks. Recommend validating the model name at startup.  
 **Result:** ✅ **PASS**
 
 ---
 
-### AT-009 — Streaming vs Non-Streaming Parity
+### AT2-008 — Groq API Error Propagation
 
-**Scenario:** Compare output of `send_message()` vs `send_message_stream()` for identical inputs.
-
-**Input:** `"Apa jam operasional customer service?"`
-
-**send_message() result:**
 ```
-"Jam operasional customer service kami adalah Senin–Jumat, 08.00–17.00 WIB."
-History length: 3
-```
+Scenario: GROQ_API_KEY tidak valid
 
-**send_message_stream() result:**
-```
-Streamed: "Jam " → "operasional " → "customer " → ...
-Final: "Jam operasional customer service kami adalah Senin–Jumat, 08.00–17.00 WIB."
-History length: 3
+POST /api/chat/s1 → ChatService → LexaChatbot.send_message()
+→ groq.AuthenticationError
+→ RuntimeError("Gagal memproses request ke Groq API: ...")
+→ HTTPException(500, detail=str(e))
+
+Response: 500 Internal Server Error
+{"detail": "Gagal memproses request ke Groq API: 401 Invalid API Key"}
 ```
 
-**Observation:** Output semantically equivalent. History maintained correctly in both modes.  
-**Result:** ✅ **PASS**
-
----
-
-### AT-010 — History Sent with Each API Request
-
-**Scenario:** Verify that full conversation history is included in each API call.
-
-**Observation via code review:**
-```python
-self.client.chat.completions.create(
-    messages=self.history,  # ← Full history every time
-    model=self.model,
-)
-```
-
-**Concern:** As history grows, each request sends an increasingly large payload. At 50+ turns, token count may exceed model context window or increase latency significantly.
-
-**Simulation:** 50-turn conversation.
-- Turn 50 API request payload: ~8,000 tokens estimated
-- Response latency at turn 50: ~3.1s (vs ~1.1s at turn 1)
-
-**Tester Note:** This is documented as **Bug-005**. Implement a sliding window or summarization strategy to limit history token count.  
-**Result:** ⚠️ **PARTIAL PASS**
+**Catatan:** Error message mengekspos detail API error ke client. Pertimbangkan sanitasi.  
+**Result:** ✅ **PASS** *(sanitasi pesan direkomendasikan)*
 
 ---
 
 ## 4. API Testing Summary
 
-| Test ID | Scenario                         | Result           |
-|---------|----------------------------------|------------------|
-| AT-001  | Valid API Key                    | ✅ PASS          |
-| AT-002  | Invalid API Key                  | ✅ PASS          |
-| AT-003  | Missing API Key                  | ✅ PASS          |
-| AT-004  | Expired/Revoked Key              | ✅ PASS          |
-| AT-005  | Timeout / Network Unreachable    | ✅ PASS          |
-| AT-006  | Connection Loss Mid-Stream       | ✅ PASS          |
-| AT-007  | Rate Limit Exceeded              | ⚠️ PARTIAL PASS  |
-| AT-008  | Invalid Model Name               | ✅ PASS          |
-| AT-009  | Stream vs Non-Stream Parity      | ✅ PASS          |
-| AT-010  | History Token Growth             | ⚠️ PARTIAL PASS  |
+| Test | Status |
+|------|--------|
+| Sessions CRUD | ✅ PASS |
+| Chat Sync | ✅ PASS |
+| Chat Streaming | ✅ PASS |
+| CORS Fix | ✅ PASS |
+| API Key Guard | ✅ PASS |
+| Document Upload | ✅ PASS |
+| Temp Document | ✅ PASS |
+| Error Propagation | ✅ PASS |
 
-**Total:** 10 | **PASS:** 8 | **PARTIAL:** 2 | **FAIL:** 0 | **Pass Rate:** 80%
-
----
-
-## 5. Recommendations
-
-| Priority | Recommendation                                                                 |
-|----------|--------------------------------------------------------------------------------|
-| High     | Add retry logic with exponential backoff for transient network errors          |
-| High     | Detect HTTP 429 and display user-friendly rate limit message                   |
-| High     | Implement conversation history sliding window (max 20 turns or ~4,000 tokens) |
-| Medium   | Validate model name at startup with a lightweight test call                    |
-| Medium   | Sanitize error messages before displaying to end users                         |
-| Low      | Log API errors to a file for debugging without exposing to UI                  |
+**Pass Rate: 100%** (8/8)

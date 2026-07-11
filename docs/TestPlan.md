@@ -1,32 +1,32 @@
-# Test Plan — SH04-AI-Chatbot-LEXA (Lexa Customer Service Chatbot)
+# Test Plan v2.0 — SH04-AI-Chatbot-LEXA
 
 ---
 
 ## Document Information
 
-| Field              | Details                                      |
-|--------------------|----------------------------------------------|
-| **Project Name**   | SH04-AI-Chatbot-LEXA                         |
-| **Document Title** | Test Plan                                    |
-| **Version**        | 1.0.0                                        |
-| **Prepared By**    | QA Engineering Team                          |
-| **Date**           | 2025-07-01                                   |
-| **Status**         | Approved                                     |
-| **Classification** | Internal / Confidential                      |
+| Field | Details |
+|-------|---------|
+| **Project Name** | SH04-AI-Chatbot-LEXA |
+| **Document Title** | Test Plan |
+| **Version** | 2.0.0 |
+| **Prepared By** | QA Engineering Team |
+| **Date** | 2026-07-10 |
+| **Status** | Active |
+| **Changelog** | Arsitektur berubah total: Streamlit monolith → Decoupled FastAPI + RAG + SQLite |
+| **Referensi Sebelumnya** | TestPlan v1.0.0 (2025-07-01) |
 
 ---
 
 ## 1. Objectives
 
-The primary objectives of this test plan are:
-
-- Verify that the Lexa chatbot correctly initializes and communicates with the Groq Cloud API.
-- Validate functional correctness across both the CLI (`main.py`) and Streamlit UI (`app.py`) interfaces.
-- Ensure robust handling of edge cases, invalid inputs, and unexpected network conditions.
-- Assess the security posture of the application, particularly regarding API key management and prompt injection risks.
-- Evaluate performance under normal and stressed conditions (response latency, streaming throughput).
-- Identify, document, and track all defects found during testing.
-- Produce a complete set of QA deliverables that serve as a living reference for future development.
+- Memvalidasi integrasi antara **Frontend (Streamlit/CLI)** dan **Backend (FastAPI)** via REST API.
+- Memverifikasi fungsionalitas **RAG Pipeline** (indexing, chunking, similarity search, PDF support).
+- Menguji semua endpoint FastAPI: `/api/sessions`, `/api/chat`, `/api/documents`.
+- Memvalidasi **persistensi chat history** menggunakan SQLite + SQLAlchemy.
+- Memastikan **keamanan** API (CORS fix, optional API key guard, prompt injection).
+- Menguji fitur baru: dynamic document upload per-sesi, rebuild RAG index, streaming SSE.
+- Meregresi semua bug lama dari v1.0 yang diklaim sudah diperbaiki.
+- Mendokumentasikan bug baru yang muncul akibat arsitektur v2.0.
 
 ---
 
@@ -34,177 +34,179 @@ The primary objectives of this test plan are:
 
 ### 2.1 In Scope
 
-| Area                     | Details                                                         |
-|--------------------------|-----------------------------------------------------------------|
-| Core LLM Module          | `llm.py` — `LexaChatbot` class, `send_message`, `send_message_stream`, `reset_chat` |
-| CLI Interface            | `main.py` — input loop, exit handling, error display           |
-| Streamlit UI             | `app.py` — layout, chat rendering, sidebar, session state      |
-| API Integration          | Groq API connectivity, streaming, error propagation            |
-| Environment Configuration| `.env` parsing, `GROQ_API_KEY` loading                         |
-| Dependency Validation    | `requirements.txt` — groq, streamlit, python-dotenv            |
-| Security                 | API key exposure, prompt injection, sensitive data leakage     |
-| Performance              | Response latency, streaming speed, memory under repeated use   |
+| Area | Komponen |
+|------|----------|
+| Backend API | `backend/main.py`, routers (chat, sessions, documents), services, models, schemas |
+| Core LLM | `core/llm.py` — LexaChatbot, RAG-augmented chat, identity fix |
+| Core RAG | `core/rag.py` — RAGPipeline, SimpleVectorStore, PDF + MD + TXT support |
+| Frontend Streamlit | `app.py` — REST client, streaming render, document upload UI |
+| CLI Interface | `main.py` — REST client, streaming output, session management |
+| Database | SQLite (`lexa.db`) — sessions, messages, documents tables |
+| Configuration | `backend/config.py`, `.env`, `backend/database.py` |
+| Security | CORS config, LEXA_API_KEY guard, prompt injection |
+| Performance | RAG latency, embedding cold start, streaming throughput, memory |
+| Regression | Bug-001 s/d Bug-005 + ST-005 dari laporan v1.0 |
 
 ### 2.2 Out of Scope
 
-- Backend infrastructure of Groq Cloud (third-party).
-- Deployment pipelines, CI/CD, containerization.
-- Database or persistent storage (not implemented).
-- Authentication / user login (not implemented).
-- Load balancing and horizontal scaling.
+- Infrastruktur deployment (Docker, cloud hosting, nginx).
+- JWT/OAuth2 authentication (backlog).
+- ChromaDB / Qdrant integration (belum diimplementasi).
+- `.docx` / `.xlsx` document parser (belum diimplementasi).
+- Multi-worker production deployment.
 
 ---
 
-## 3. Environment
-
-### 3.1 Software Requirements
-
-| Component        | Version / Specification                  |
-|------------------|------------------------------------------|
-| Python           | 3.9+                                     |
-| Streamlit        | Latest stable (≥ 1.30)                  |
-| groq (SDK)       | Latest stable                            |
-| python-dotenv    | Latest stable                            |
-| OS               | Windows 10/11, macOS 13+, Ubuntu 22.04+ |
-| Browser (UI)     | Chrome 120+, Firefox 121+, Edge 120+    |
-
-### 3.2 Hardware Requirements
-
-| Component | Minimum         | Recommended     |
-|-----------|-----------------|-----------------|
-| CPU       | 2 cores         | 4 cores         |
-| RAM       | 4 GB            | 8 GB            |
-| Network   | 10 Mbps         | 50 Mbps         |
-
-### 3.3 Test Environment Setup
+## 3. Arsitektur Sistem v2.0
 
 ```
-Project Root/
-├── .env               ← Contains GROQ_API_KEY=<valid_key>
-├── requirements.txt
-├── llm.py
-├── main.py
-├── app.py
-└── .venv/             ← Isolated virtual environment
+┌──────────────────────────────────────────────────────────┐
+│  Client Layer                                            │
+│  ┌─────────────┐         ┌────────────────────────────┐ │
+│  │  main.py    │         │        app.py              │ │
+│  │  (CLI REST) │         │  (Streamlit REST Client)   │ │
+│  └──────┬──────┘         └────────────┬───────────────┘ │
+└─────────┼───────────────────────────┼──────────────────┘
+          │ HTTP/REST                  │ HTTP/REST + SSE
+          ▼                            ▼
+┌──────────────────────────────────────────────────────────┐
+│  FastAPI Backend (:8000)                                 │
+│  ┌────────────┬───────────┬──────────────────────────┐  │
+│  │ /sessions  │  /chat    │  /documents              │  │
+│  │ router     │  router   │  router                  │  │
+│  └─────┬──────┴─────┬─────┴──────────┬───────────────┘  │
+│        │             │                │                   │
+│  ┌─────▼─────────────▼────────────────▼─────────────┐   │
+│  │           Services Layer                          │   │
+│  │    ChatService      DocumentService               │   │
+│  └─────┬──────────────────────┬────────────────────┘   │
+│        │                      │                          │
+│  ┌─────▼──────┐    ┌──────────▼───────────────────┐    │
+│  │ SQLite DB  │    │  Core Layer                  │    │
+│  │ lexa.db    │    │  LexaChatbot + RAGPipeline   │    │
+│  │ sessions   │    │  SimpleVectorStore           │    │
+│  │ messages   │    │  sentence-transformers       │    │
+│  │ documents  │    └──────────┬───────────────────┘    │
+│  └────────────┘               │ HTTPS                   │
+└───────────────────────────────┼─────────────────────────┘
+                                 ▼
+                        Groq Cloud API
+                     (openai/gpt-oss-120b)
 ```
 
 ---
 
-## 4. Test Types
+## 4. Test Environment
 
-| Type                 | Description                                                          |
-|----------------------|----------------------------------------------------------------------|
-| Functional Testing   | Verify features work as specified                                    |
-| UI Testing           | Validate Streamlit interface layout, components, responsiveness      |
-| API Testing          | Test Groq API integration under valid and invalid conditions         |
-| Negative Testing     | Test application behavior with invalid, malformed, or extreme inputs |
-| Security Testing     | Assess vulnerabilities in key handling and data exposure             |
-| Performance Testing  | Measure response time, latency, memory usage                         |
+| Komponen | Versi / Spesifikasi |
+|----------|---------------------|
+| Python | 3.9+ (recommended 3.11) |
+| FastAPI | Latest stable |
+| Uvicorn | Latest stable (with standard) |
+| SQLAlchemy | Latest stable |
+| Streamlit | Latest stable |
+| groq SDK | Latest stable |
+| sentence-transformers | Latest stable (model: all-MiniLM-L6-v2 ~80MB) |
+| numpy | Latest stable |
+| pypdf | Latest stable |
+| python-multipart | Latest stable |
+| requests | Latest stable *(tidak ada di requirements.txt — Bug-006)* |
+| OS | Windows 10/11, Ubuntu 22.04+, macOS 13+ |
+| DB | SQLite (`lexa.db`) |
+| Port Backend | 8000 |
+| Port Frontend | 8501 |
+
+**Startup Order yang Benar:**
+```
+1. uvicorn backend.main:app --host 127.0.0.1 --port 8000
+2. streamlit run app.py         (tunggu backend ready dulu)
+# CLI: python main.py           (opsional, paralel dengan streamlit)
+```
 
 ---
 
-## 5. Test Strategy
+## 5. Test Types
 
-### 5.1 Approach
-
-Testing is conducted in a **black-box** and **grey-box** hybrid approach:
-- **Black-box**: Tester interacts with CLI and Streamlit UI as an end user.
-- **Grey-box**: Tester reviews source code to identify potential edge cases and security risks.
-
-### 5.2 Testing Sequence
-
-```
-Phase 1: Environment Setup & Smoke Test
-Phase 2: Functional Testing (CLI + UI)
-Phase 3: UI Testing (Streamlit layout, components)
-Phase 4: API Testing (valid / invalid / missing keys)
-Phase 5: Negative Testing (bad inputs, injections)
-Phase 6: Security Testing (key exposure, prompt injection)
-Phase 7: Performance Testing (latency, streaming, memory)
-Phase 8: Bug Reporting & Regression
-```
-
-### 5.3 Test Data
-
-| Category         | Data                                                   |
-|------------------|--------------------------------------------------------|
-| Valid Input      | Normal Indonesian customer service questions           |
-| Empty Input      | `""`, whitespace-only strings                          |
-| Long Input       | Strings > 5,000 characters                            |
-| Special Chars    | `!@#$%^&*()`, `<script>`, `'; DROP TABLE`             |
-| Unicode          | Arabic, Chinese, emoji (🔥), mixed scripts             |
-| Injection        | `Ignore all previous instructions and...`             |
-| API Keys         | Valid, invalid format, empty, expired                  |
+| Tipe | Ruang Lingkup |
+|------|---------------|
+| Functional | Lifecycle chat end-to-end, RAG pipeline, session management |
+| API/Integration | Semua endpoint FastAPI, request/response validation |
+| UI | Streamlit layout, konektivitas API, upload UI, referensi display |
+| CLI | CLI streaming, error handling, session management |
+| Negative | Input invalid, file rusak, API mati, format tidak didukung |
+| Security | CORS, API key guard, prompt injection, pickle risk, error leakage |
+| Performance | RAG latency, cold start, streaming, memory growth |
+| Regression | Verifikasi semua bug v1.0 — fixed atau masih open |
 
 ---
 
 ## 6. Entry Criteria
 
-- [ ] All source files (`main.py`, `app.py`, `llm.py`) are present and syntactically valid.
-- [ ] `requirements.txt` dependencies are installed in a virtual environment.
-- [ ] A valid `GROQ_API_KEY` is configured in `.env`.
-- [ ] Groq Cloud API is reachable from the test environment.
-- [ ] Python version ≥ 3.9 is confirmed.
-- [ ] Test environment is isolated from production.
+- [ ] `uvicorn backend.main:app` berjalan tanpa error.
+- [ ] `GROQ_API_KEY` valid ada di `.env`.
+- [ ] Semua dependencies terinstall (termasuk `requests` manual — Bug-006).
+- [ ] `http://127.0.0.1:8000/docs` dapat diakses (Swagger UI).
+- [ ] SQLite DB terbuat otomatis (`lexa.db`).
+- [ ] RAG index berhasil dimuat atau dibangun.
+- [ ] Minimal 1 dokumen ada di `knowledge_base/`.
 
 ---
 
 ## 7. Exit Criteria
 
-- [ ] All 30+ planned test cases have been executed.
-- [ ] All **Critical** and **High** severity bugs are resolved or formally accepted.
-- [ ] Test pass rate ≥ 85%.
-- [ ] All QA deliverables (TestCases, Bug Reports, Final Report) are complete.
-- [ ] Security vulnerabilities classified as Critical are mitigated.
-- [ ] Test Summary Report is reviewed and signed off.
+- [ ] ≥ 45 test cases dieksekusi.
+- [ ] Overall pass rate ≥ 80%.
+- [ ] Semua bug Critical diselesaikan.
+- [ ] Regression report lengkap.
+- [ ] Semua deliverables QA v2.0 selesai.
 
 ---
 
-## 8. Risks
+## 8. Risks v2.0
 
-| Risk ID | Risk Description                                     | Likelihood | Impact | Mitigation                                         |
-|---------|------------------------------------------------------|------------|--------|----------------------------------------------------|
-| R-001   | Groq API rate limit reached during testing           | Medium     | High   | Use test account with high quota; add delays       |
-| R-002   | API key accidentally committed to version control    | High       | High   | Enforce `.gitignore` for `.env`; use secret scanning|
-| R-003   | Model `openai/gpt-oss-120b` deprecated or renamed    | Medium     | High   | Parameterize model name; test fallback models      |
-| R-004   | Groq API downtime during test sessions               | Low        | High   | Schedule testing during off-peak hours             |
-| R-005   | Streamlit version incompatibility                    | Low        | Medium | Pin versions in `requirements.txt`                 |
-| R-006   | Missing `.env` file in deployment causes silent fail | High       | High   | Add startup validation and clear error message     |
-| R-007   | Chat history grows unbounded in long sessions        | Medium     | Medium | Implement history pruning; test with 100+ turns    |
-| R-008   | Prompt injection leads to off-topic or harmful output| Medium     | High   | Add input sanitization layer                       |
+| Risk ID | Deskripsi | Likelihood | Impact | Mitigasi |
+|---------|-----------|------------|--------|----------|
+| R-001 | `requests` tidak di requirements.txt | High | Critical | Tambah segera |
+| R-002 | Backend harus jalan sebelum frontend | High | High | Dokumentasikan urutan startup |
+| R-003 | Model download 80MB saat pertama kali | Medium | Medium | Tambah ke install guide |
+| R-004 | Pickle vector index tidak aman | Medium | High | Migrasikan ke ChromaDB |
+| R-005 | Session pipeline memory leak | Medium | High | Implementasikan eviction |
+| R-006 | Orphaned user message saat stream gagal | Medium | Medium | Atomic save setelah stream |
+| R-007 | SQLite concurrent write di multi-worker | Low | High | Gunakan PostgreSQL untuk prod |
+| R-008 | Stream error leakage ke client | Medium | Medium | Sanitasi error message |
 
 ---
 
-## 9. Deliverables
+## 9. Deliverables v2.0
 
-| Deliverable                          | Location                              | Status      |
-|--------------------------------------|---------------------------------------|-------------|
-| Test Plan                            | `docs/TestPlan.md`                    | ✅ Complete |
-| Test Cases                           | `tests/TestCases.md`                  | ✅ Complete |
-| Functional Testing Report            | `tests/FunctionalTesting.md`          | ✅ Complete |
-| UI Testing Report                    | `tests/UITesting.md`                  | ✅ Complete |
-| API Testing Report                   | `tests/APITesting.md`                 | ✅ Complete |
-| Negative Testing Report              | `tests/NegativeTesting.md`            | ✅ Complete |
-| Security Testing Report              | `tests/SecurityTesting.md`            | ✅ Complete |
-| Performance Testing Report           | `tests/PerformanceTesting.md`         | ✅ Complete |
-| Bug Reports (001–005)                | `bug_reports/Bug00X.md`               | ✅ Complete |
-| User Guide                           | `docs/UserGuide.md`                   | ✅ Complete |
-| Installation Guide                   | `docs/InstallationGuide.md`           | ✅ Complete |
-| Technical Documentation              | `docs/TechnicalDocumentation.md`      | ✅ Complete |
-| QA Report                            | `reports/QA_Report.md`                | ✅ Complete |
-| Test Summary                         | `reports/TestSummary.md`              | ✅ Complete |
-| Final Report                         | `reports/FinalReport.md`              | ✅ Complete |
+| Deliverable | File | Status |
+|-------------|------|--------|
+| Test Plan v2.0 | `docs/TestPlan.md` | ✅ |
+| Test Cases v2.0 | `tests/TestCases.md` | ✅ |
+| Functional Testing v2.0 | `tests/FunctionalTesting.md` | ✅ |
+| UI Testing v2.0 | `tests/UITesting.md` | ✅ |
+| API Testing v2.0 | `tests/APITesting.md` | ✅ |
+| Negative Testing v2.0 | `tests/NegativeTesting.md` | ✅ |
+| Security Testing v2.0 | `tests/SecurityTesting.md` | ✅ |
+| Performance Testing v2.0 | `tests/PerformanceTesting.md` | ✅ |
+| Bug Reports (006–010) | `bug_reports/Bug00X.md` | ✅ |
+| Regression Report | `reports/RegressionReport.md` | ✅ |
+| QA Report | `reports/QA_Report.md` | ✅ |
+| Test Summary | `reports/TestSummary.md` | ✅ |
+| Final Report v2.0 | `reports/FinalReport.md` | ✅ |
+| User Guide v2.0 | `docs/UserGuide.md` | ✅ |
+| Installation Guide v2.0 | `docs/InstallationGuide.md` | ✅ |
+| Technical Documentation v2.0 | `docs/TechnicalDocumentation.md` | ✅ |
 
 ---
 
 ## 10. Approval
 
-| Role               | Name              | Signature        | Date       |
-|--------------------|-------------------|------------------|------------|
-| QA Lead            | QA Engineering    | _(signed)_       | 2025-07-01 |
-| Project Owner      | Development Team  | _(pending)_      | —          |
-| Technical Reviewer | Senior Dev        | _(pending)_      | —          |
+| Role | Name | Signature | Date |
+|------|------|-----------|------|
+| QA Lead | QA Engineering Team | _(signed)_ | 2026-07-10 |
+| Backend Dev | — | _(pending)_ | — |
+| Project Owner | — | _(pending)_ | — |
 
 ---
-
-*Document prepared in accordance with IEEE 829 Standard for Software Test Documentation.*
+*IEEE 829 Standard — SH04-AI-Chatbot-LEXA Test Plan v2.0 — 2026-07-10*

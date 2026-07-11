@@ -1,134 +1,117 @@
-# QA Report — SH04-AI-Chatbot-LEXA
+# QA Report v2.0 — SH04-AI-Chatbot-LEXA
 
 **Project:** SH04-AI-Chatbot-LEXA  
-**Version:** 1.0.0  
+**Version:** 2.0.0  
 **QA Lead:** QA Engineering Team  
-**Report Date:** 2025-07-01  
-**Report Type:** Comprehensive Quality Assessment
+**Date:** 2026-07-10
 
 ---
 
 ## 1. Executive Summary
 
-The Lexa Customer Service Chatbot (SH04-AI-Chatbot-LEXA) was subjected to a full QA evaluation covering functional, UI, API, negative, security, and performance testing. The application demonstrates strong core functionality and a clean architecture for an early-stage chatbot prototype. The Groq API integration is well-implemented, streaming works correctly, and the Streamlit interface provides a professional user experience.
+SH04-AI-Chatbot-LEXA v2.0 menghadirkan perubahan arsitektur yang signifikan dan matang: dari monolith Streamlit menjadi sistem decoupled FastAPI backend + RAG pipeline + SQLite persistence. Peningkatan kualitas dibandingkan v1.0 sangat nyata — terutama dari sisi persistensi data, kemampuan RAG, dan pemisahan concerns yang bersih.
 
-However, **2 Critical security vulnerabilities** were identified (missing `.gitignore` and absence of prompt injection defenses), along with **3 High severity bugs** related to input validation, rate limit handling, and unbounded history growth. These issues must be resolved before production deployment.
+**Namun**, 1 bug Critical baru ditemukan (Bug-006: `requests` tidak di `requirements.txt`) yang menyebabkan **fresh install gagal total** sebelum aplikasi sempat dijalankan. Ini harus diperbaiki segera sebelum distribusi apapun.
 
-**Overall QA Verdict: CONDITIONAL PASS** — suitable for development/demo use; requires remediation before production.
+**Verdict: CONDITIONAL PASS** — matang secara arsitektur, perlu 1 critical fix dan beberapa high fixes.
 
 ---
 
-## 2. Test Coverage Summary
+## 2. Coverage Summary
 
-| Test Category       | Cases | PASS | PARTIAL | FAIL | Pass Rate |
-|---------------------|-------|------|---------|------|-----------|
-| Functional Testing  | 10    | 10   | 0       | 0    | 100%      |
-| UI Testing          | 13    | 11   | 1       | 1    | 84.6%     |
-| API Testing         | 10    | 8    | 2       | 0    | 80%       |
-| Negative Testing    | 11    | 7    | 2       | 3    | 63.6%     |
-| Security Testing    | 9     | 5    | 2       | 2    | 55.6%     |
-| Performance Testing | 10    | 8    | 2       | 0    | 80%       |
-| **TOTAL**           | **63**| **49**| **9** | **6**| **77.8%** |
+| Kategori | Cases | PASS | PARTIAL | FAIL | Rate |
+|----------|-------|------|---------|------|------|
+| Functional | 12 | 12 | 0 | 0 | **100%** |
+| RAG Pipeline | 8 | 8 | 0 | 0 | **100%** |
+| API/Integration | 8 | 8 | 0 | 0 | **100%** |
+| UI | 12 | 8 | 3 | 1 | **66.7%** |
+| Negative | 10 | 6 | 2 | 2 | **60%** |
+| Security | 6 | 3 | 3 | 0 | **50%** |
+| Performance | 7 | 5 | 2 | 0 | **71.4%** |
+| **TOTAL** | **63** | **50** | **10** | **3** | **79.4%** |
 
 ---
 
 ## 3. Bug Statistics
 
-### Bugs by Severity
+| Severity | Jumlah | Bug IDs |
+|----------|--------|---------|
+| 🔴 Critical | 1 | Bug-006 |
+| 🟠 High | 5 | Bug-002, Bug-004, Bug-005, Bug-007, Bug-008 |
+| 🟡 Medium | 3 | Bug-003, Bug-009, Bug-010 |
+| **Total Aktif** | **9** | |
 
-| Severity | Count | Bugs |
-|----------|-------|------|
-| 🔴 Critical | 2 | Bug-001 (missing .gitignore), ST-005 (prompt injection) |
-| 🟠 High | 3 | Bug-002 (no input validation), Bug-004 (rate limit), Bug-005 (history growth) |
-| 🟡 Medium | 3 | Bug-003 (dark mode CSS), Race condition, TC-A-010 (history token growth) |
-| 🟢 Low | 2 | External icon dependency, Mobile sidebar overlap |
-| **Total** | **10** | |
-
-### Bugs by Component
-
-| Component | Bug Count |
-|-----------|-----------|
-| `llm.py` | 3 (validation, rate limit, history) |
-| `app.py` | 2 (dark mode, race condition) |
-| Repository Config | 1 (.gitignore) |
-| System Prompt | 1 (injection defense) |
-| UI/UX | 2 (mobile, external icon) |
-| Performance | 1 (history latency) |
+| Status | Jumlah |
+|--------|--------|
+| Confirmed Fixed | 5 *(dari v1.0)* |
+| Still Open (carry-over) | 4 *(dari v1.0)* |
+| New Bugs in v2.0 | 5 |
 
 ---
 
-## 4. Risk Assessment
+## 4. Regression Result
 
-| Risk | Likelihood | Impact | Level |
-|------|------------|--------|-------|
-| API key exposed via VCS | High | Critical | 🔴 **CRITICAL** |
-| Prompt injection jailbreak | Medium | High | 🟠 **HIGH** |
-| App crash from None/empty input | Medium | High | 🟠 **HIGH** |
-| History overflow at 200+ turns | High | Medium | 🟠 **HIGH** |
-| Rate limit failure UX | High | Medium | 🟡 **MEDIUM** |
-| Dark mode unusable | Low | Low | 🟢 **LOW** |
+| Bug v1.0 | Status |
+|----------|--------|
+| Bug-001 (gitignore) | ✅ FIXED |
+| Bug-002 (input validation) | ⚠️ STILL OPEN |
+| Bug-003 (dark mode) | ⚠️ STILL OPEN |
+| Bug-004 (rate limit) | ⚠️ STILL OPEN |
+| Bug-005 (history growth) | ⚠️ PARTIALLY FIXED |
+| CORS wildcard | ✅ FIXED |
+| PDF indexing | ✅ FIXED |
+| PDF DB sync | ✅ FIXED |
+| Identity hallucination | ✅ FIXED |
 
 ---
 
-## 5. Findings by Category
+## 5. Strength vs Weakness
 
-### ✅ What Works Well
+**✅ Strengths:**
+- Arsitektur decoupled yang bersih dan scalable
+- FastAPI dengan layering router/service/schema yang proper
+- SQLite persistence — riwayat chat tidak hilang lagi
+- RAG pipeline fungsional dengan referensi sumber yang transparan
+- PDF support end-to-end
+- CORS fix — security posture meningkat
+- Optional API key guard
+- Per-session document isolation
+- Swagger UI auto-generated
 
-- Core `LexaChatbot` class is well-structured with proper separation of concerns.
-- Streaming implementation is correct and provides excellent UX.
-- History rollback on API error prevents corrupted conversation state.
-- Streamlit session state management is correctly implemented.
-- System message filtering prevents system prompt exposure in UI.
-- Error handling surfaces meaningful messages in both CLI and Streamlit.
-- Groq API integration is fast (avg 0.92s TTFT) and reliable.
-- XSS attack surface is minimal in Streamlit context.
-
-### ❌ What Needs Improvement
-
-- No `.gitignore` — critical security gap.
-- No input validation in `send_message()` — edge case vulnerabilities.
-- No rate limit error handling — poor UX on 429 errors.
-- Prompt injection defenses not in system prompt — moderate risk.
-- Unbounded history growth — performance and reliability risk.
-- Dark mode CSS override — visual inconsistency.
-- No retry logic on transient API failures.
-- Model name not validated at startup.
+**❌ Weaknesses:**
+- `requests` tidak di requirements.txt (fresh install crash)
+- Tidak ada file size validation
+- Orphaned message saat stream disconnect
+- Session pipeline memory leak
+- Dark mode CSS masih broken
+- Prompt injection defense belum complete
+- Pickle deserialization risk
+- Non-standard SSE format
+- Error leakage dalam stream response
 
 ---
 
 ## 6. Recommendations
 
-### Immediate Actions (Before Any Public Share/Commit)
-
-1. **Create `.gitignore`** and add `.env` — prevents API key exposure.
-2. **Rotate API key** if `.env` was ever committed to VCS.
-
-### Short-Term (Next Sprint)
-
-3. **Add input validation** in `send_message()` and `send_message_stream()`.
-4. **Handle `RateLimitError`** with user-friendly message.
-5. **Implement history sliding window** (max 20 turns).
-6. **Harden system prompt** with anti-injection clauses.
-
-### Medium-Term (Next Release)
-
-7. **Fix dark mode CSS** using Streamlit theming system.
-8. **Add retry logic** with exponential backoff.
-9. **Bundle bot icon** locally instead of CDN.
-10. **Pin dependency versions** in `requirements.txt`.
-11. **Add model validation** at startup.
-12. **Add Reset confirmation dialog** to prevent accidental history loss.
+| Priority | Action |
+|----------|--------|
+| 🔴 P1 | Tambah `requests` ke `requirements.txt` |
+| 🟠 P2 | Tambah file size validation (max 10MB) di backend |
+| 🟠 P2 | Perbaiki orphaned message dengan atomic DB save |
+| 🟠 P2 | Tambah `_validate_message()` di `core/llm.py` |
+| 🟠 P2 | Handle `RateLimitError` secara spesifik |
+| 🟠 P2 | Implementasikan sliding window untuk history ke API |
+| 🟡 P3 | Tambah TTL/eviction untuk `_session_pipelines` |
+| 🟡 P3 | Pisahkan file-clear dari session-reset |
+| 🟡 P3 | Fix dark mode CSS |
+| 🟡 P3 | Harden system prompt anti-injection |
+| 🟡 P3 | Migrasi Pickle ke format aman |
+| 🟡 P3 | Sanitasi error message dalam stream |
 
 ---
 
-## 7. QA Conclusion
+## 7. QA Sign-off
 
-**The Lexa Chatbot is a well-designed, functional prototype** demonstrating solid Python architecture and effective use of the Groq API. The core features work correctly, streaming performance is excellent, and the Streamlit UI provides a pleasant user experience.
-
-The application is **ready for development and internal demo use** but requires the identified critical and high priority fixes before production deployment or public release.
-
-**QA Sign-off:** Conditional Approval — Pending Bug-001 and Bug-002 resolution minimum.
-
----
-
-*Report prepared by QA Engineering Team — 2025-07-01*
+**Status:** CONDITIONAL PASS  
+**QA Lead:** QA Engineering Team — 2026-07-10  
+**Re-test Required:** Ya, setelah Bug-006, Bug-007, Bug-008 diperbaiki.

@@ -1,85 +1,91 @@
-# Installation Guide — SH04-AI-Chatbot-LEXA
+# Installation Guide v2.0 — SH04-AI-Chatbot-LEXA
 
 **Project:** SH04-AI-Chatbot-LEXA  
-**Version:** 1.0.0  
-**Last Updated:** 2025-07-01
+**Version:** 2.0.0  
+**Last Updated:** 2026-07-10
 
 ---
 
 ## System Requirements
 
-| Component | Minimum | Recommended |
-|-----------|---------|-------------|
+| Komponen | Minimum | Recommended |
+|----------|---------|-------------|
 | Python | 3.9 | 3.11+ |
-| RAM | 2 GB free | 4 GB free |
-| Storage | 200 MB | 500 MB |
-| OS | Windows 10 / macOS 12 / Ubuntu 20.04 | Latest stable |
-| Network | Required (for Groq API) | Stable broadband |
+| RAM | 4 GB | 8 GB *(untuk embedding model)* |
+| Storage | 500 MB | 1 GB *(model ~80MB + DB + docs)* |
+| OS | Windows 10 / Ubuntu 20.04 / macOS 12 | Latest stable |
+| Network | Required (Groq API + model download) | Stable broadband |
+
+> ⚠️ **Perhatian:** Pada startup pertama, model `all-MiniLM-L6-v2` (~80MB) akan diunduh otomatis oleh `sentence-transformers`. Pastikan koneksi internet stabil.
 
 ---
 
-## Step 1 — Get Groq API Key
+## Step 1 — Dapatkan Groq API Key
 
-1. Open [https://console.groq.com](https://console.groq.com) in your browser.
-2. Sign up for a free account or log in.
-3. Navigate to **API Keys** in the sidebar.
-4. Click **"Create API Key"**.
-5. Copy the key (starts with `gsk_...`). **Store it securely — it will not be shown again.**
-
-> ✅ Groq offers a generous free tier with fast LPU inference.
+1. Buka [https://console.groq.com](https://console.groq.com)
+2. Daftar atau login.
+3. Navigasi ke **API Keys** → **Create API Key**.
+4. Copy key (awalan `gsk_...`) dan simpan dengan aman.
 
 ---
 
-## Step 2 — Get the Project Files
+## Step 2 — Clone atau Download Project
 
-**Option A — Clone from Git:**
 ```bash
-git clone https://github.com/your-repo/SH04-AI-Chatbot-LEXA.git
-cd SH04-AI-Chatbot-LEXA
+# Clone via Git
+git clone https://github.com/ndiecyber/SH04-AI-Chatboot-LEXA.git
+cd SH04-AI-Chatboot-LEXA
+
+# Atau download ZIP dan extract
 ```
 
-**Option B — Download ZIP:**
-1. Download and extract the project ZIP.
-2. Open a terminal and navigate to the extracted folder.
-
-**Verify files exist:**
+**Pastikan struktur folder ada:**
 ```
-SH04-AI-Chatbot-LEXA/
-├── main.py
+SH04-AI-Chatboot-LEXA/
+├── backend/
+│   ├── main.py
+│   ├── config.py
+│   ├── database.py
+│   ├── models.py
+│   ├── schemas.py
+│   ├── globals.py
+│   ├── routers/
+│   │   ├── chat.py
+│   │   ├── sessions.py
+│   │   └── documents.py
+│   └── services/
+│       ├── chat_service.py
+│       └── document_service.py
+├── core/
+│   ├── llm.py
+│   └── rag.py
+├── knowledge_base/     ← Folder dokumen basis pengetahuan
 ├── app.py
-├── llm.py
+├── main.py
 ├── requirements.txt
-└── README.md
+├── .env.example
+└── .gitignore
 ```
 
 ---
 
-## Step 3 — Set Up Python Virtual Environment
+## Step 3 — Buat Virtual Environment
 
-Using a virtual environment is **strongly recommended** to isolate dependencies.
-
-### Windows (PowerShell)
-```powershell
+```bash
+# Buat venv
 python -m venv .venv
+
+# Aktifkan (macOS/Linux)
+source .venv/bin/activate
+
+# Aktifkan (Windows PowerShell)
 .\.venv\Scripts\Activate.ps1
-```
 
-### Windows (Command Prompt)
-```cmd
-python -m venv .venv
+# Aktifkan (Windows CMD)
 .\.venv\Scripts\activate.bat
 ```
 
-### macOS / Linux
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-**Verify activation** — your prompt should show `(.venv)`:
-```
-(.venv) user@machine:~/project$
-```
+Prompt akan berubah menjadi `(.venv) ...`
 
 ---
 
@@ -89,159 +95,173 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-This installs:
-- `groq` — Groq Cloud API SDK
-- `streamlit` — Web UI framework
-- `python-dotenv` — Environment variable loader
-
-**Verify installation:**
+> ⚠️ **Bug-006 Workaround:** Library `requests` tidak ada di `requirements.txt`. Install manual:
 ```bash
-pip list | grep -E "groq|streamlit|python-dotenv"
+pip install requests
 ```
 
-Expected output:
+**Daftar lengkap yang dibutuhkan:**
 ```
-groq                0.x.x
-python-dotenv       1.x.x
-streamlit           1.x.x
+groq
+python-dotenv
+streamlit
+sentence-transformers
+numpy
+pypdf
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-multipart
+requests           ← Install manual (Bug-006)
+```
+
+**Verifikasi instalasi:**
+```bash
+python -c "import groq, streamlit, fastapi, sentence_transformers, requests; print('OK')"
 ```
 
 ---
 
-## Step 5 — Configure Environment Variables
+## Step 5 — Setup Environment Variables
 
-Create a file named `.env` in the project root:
-
+Salin file contoh:
 ```bash
-# On macOS/Linux:
-touch .env
+# macOS/Linux
+cp .env.example .env
 
-# On Windows (PowerShell):
-New-Item .env -ItemType File
+# Windows
+copy .env.example .env
 ```
 
-Open `.env` in a text editor and add:
+Edit `.env`:
 ```env
+# WAJIB — Groq API Key
 GROQ_API_KEY=gsk_YourActualGroqApiKeyHere
+
+# OPSIONAL — Kunci perlindungan API backend (kosongkan untuk nonaktif)
+# LEXA_API_KEY=your_secret_backend_key
+
+# OPSIONAL — Model (default: openai/gpt-oss-120b)
+# LEXA_MODEL=llama-3.1-8b-instant
 ```
 
-> ⚠️ **Security Warning:** Never commit this file to version control. Add `.env` to your `.gitignore`.
-
-**Create `.gitignore` (important!):**
-```bash
-echo ".env" >> .gitignore
-echo ".venv/" >> .gitignore
-echo "__pycache__/" >> .gitignore
-```
+> ✅ File `.env` sudah tercatat di `.gitignore` — aman dari VCS.
 
 ---
 
-## Step 6 — Verify Installation
+## Step 6 — Siapkan Basis Pengetahuan (Opsional)
 
-Run a quick test to verify everything is working:
+Tambahkan dokumen ke folder `knowledge_base/` agar Lexa bisa menjawab berdasarkan informasi spesifik bisnis Anda:
 
 ```bash
-python -c "
-from llm import LexaChatbot
-print('Import successful')
-bot = LexaChatbot()
-print('Chatbot initialized successfully')
-print('Model:', bot.model)
-"
+# Contoh struktur knowledge_base/
+knowledge_base/
+├── faq.md          ← FAQ layanan
+├── pricing.md      ← Informasi harga
+├── features.md     ← Fitur produk
+└── policy.pdf      ← Kebijakan refund, dll
 ```
 
-Expected output:
-```
-Import successful
-Chatbot initialized successfully
-Model: openai/gpt-oss-120b
-```
+Format yang didukung: `.md`, `.txt`, `.pdf`
 
-If you see an error, check the Troubleshooting section below.
+Folder ini akan diindeks otomatis saat backend pertama kali dijalankan.
 
 ---
 
-## Step 7 — Run the Application
+## Step 7 — Jalankan Aplikasi
 
-### Option A: CLI Mode
+### Backend (wajib dijalankan lebih dulu)
+
 ```bash
-python main.py
+uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-### Option B: Streamlit Web UI
+Tunggu output berikut sebelum melanjutkan:
+```
+Memuat basis pengetahuan RAG...
+Indeks RAG berhasil dimuat dari cache.    ← atau "dibangun baru"
+RAG basis pengetahuan dimuat!
+INFO: Application startup complete.
+INFO: Uvicorn running on http://127.0.0.1:8000
+```
+
+> ⏳ **Startup pertama** membutuhkan waktu lebih lama (~30–40 detik) karena download model `all-MiniLM-L6-v2` (~80MB). Startup berikutnya ~3–5 detik dari cache.
+
+### Frontend Streamlit (Terminal baru)
+
 ```bash
 streamlit run app.py
 ```
 
-The browser will automatically open at `http://localhost:8501`.
+Browser otomatis terbuka di `http://localhost:8501`.
 
----
+### CLI (Opsional, Terminal baru)
 
-## Troubleshooting Installation
-
-### Error: `python` not found
-```
-'python' is not recognized as an internal or external command
-```
-**Fix:** Use `python3` instead of `python`, or ensure Python is added to PATH.
-
----
-
-### Error: `pip` not found
-**Fix:**
 ```bash
-python -m pip install -r requirements.txt
+python main.py
 ```
 
 ---
 
-### Error: `ModuleNotFoundError: No module named 'groq'`
-**Fix:** Ensure your virtual environment is activated before installing:
+## Step 8 — Verifikasi Instalasi
+
+1. Buka `http://127.0.0.1:8000/docs` → Swagger UI harus tampil.
+2. Buka `http://localhost:8501` → Chat interface harus tampil tanpa error banner.
+3. Kirim pesan "Halo" → Lexa harus merespons dalam Bahasa Indonesia.
+
+---
+
+## Troubleshooting Instalasi
+
+### `ModuleNotFoundError: No module named 'requests'`
 ```bash
-source .venv/bin/activate  # macOS/Linux
-pip install -r requirements.txt
+pip install requests
 ```
 
----
-
-### Error: `ValueError: API Key Groq tidak ditemukan!`
-**Fix:** Ensure `.env` file exists with correct content:
+### `ModuleNotFoundError: No module named 'backend'`
+Pastikan menjalankan perintah dari root folder proyek:
 ```bash
-cat .env
-# Should output: GROQ_API_KEY=gsk_...
+cd SH04-AI-Chatboot-LEXA
+uvicorn backend.main:app ...
 ```
 
----
+### Backend startup sangat lambat (>60 detik)
+Model sedang diunduh. Periksa koneksi internet. Cukup tunggu — proses ini hanya terjadi sekali.
 
-### Error: PowerShell execution policy (Windows)
+### `Address already in use` pada port 8000
+```bash
+# Cari proses yang menggunakan port
+lsof -i :8000          # macOS/Linux
+netstat -ano | findstr :8000  # Windows
+
+# Gunakan port lain
+uvicorn backend.main:app --port 8001
+# Update API_URL di app.py: API_URL = "http://127.0.0.1:8001"
 ```
-cannot be loaded because running scripts is disabled on this system
-```
-**Fix:**
+
+### Streamlit "Backend tidak tersedia"
+Backend belum berjalan. Jalankan `uvicorn` terlebih dahulu di terminal terpisah.
+
+### PowerShell ExecutionPolicy Error (Windows)
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
----
-
-### Streamlit port already in use
-```
-Port 8501 is already in use
-```
-**Fix:**
+### Error `ValueError: GROQ_API_KEY tidak ditemukan`
+Periksa file `.env`:
 ```bash
-streamlit run app.py --server.port 8502
+cat .env
+# Harus ada: GROQ_API_KEY=gsk_...
 ```
 
 ---
 
-## Uninstallation
+## Uninstall
 
-To remove the project and its dependencies:
 ```bash
-deactivate          # Exit virtual environment
+deactivate
 cd ..
-rm -rf SH04-AI-Chatbot-LEXA/   # Remove project folder
+rm -rf SH04-AI-Chatboot-LEXA/
 ```
 
-No system-wide changes are made when using a virtual environment.
+Tidak ada perubahan sistem yang dilakukan selain folder project dan virtual environment.

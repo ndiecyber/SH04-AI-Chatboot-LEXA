@@ -1,100 +1,95 @@
-# Test Summary Report — SH04-AI-Chatbot-LEXA
+# Test Summary Report v2.0 — SH04-AI-Chatbot-LEXA
 
-**Project:** SH04-AI-Chatbot-LEXA  
-**Version:** 1.0.0  
-**Date:** 2025-07-01  
-**Prepared By:** QA Engineering Team
+**Project:** SH04-AI-Chatbot-LEXA | **Version:** 2.0.0 | **Date:** 2026-07-10
 
 ---
 
-## Test Execution Summary
+## Execution Summary
 
-| Metric                        | Value      |
-|-------------------------------|------------|
-| **Total Test Cases Planned**  | 63         |
-| **Total Test Cases Executed** | 63         |
-| **PASS**                      | 49 (77.8%) |
-| **PARTIAL PASS**              | 9 (14.3%)  |
-| **FAIL**                      | 6 (9.5%)   |
-| **Blocked**                   | 0 (0%)     |
-| **Not Executed**              | 0 (0%)     |
+| Metrik | Nilai |
+|--------|-------|
+| Total Test Cases Direncanakan | 63 |
+| Total Test Cases Dieksekusi | 63 |
+| ✅ PASS | 50 (79.4%) |
+| ⚠️ PARTIAL PASS | 10 (15.9%) |
+| ❌ FAIL | 3 (4.8%) |
+| 🚫 Blocked / Not Run | 0 |
 
 ---
 
-## Results by Category
+## Hasil per Kategori
 
 ```
-Functional  ██████████████████████████████  100%  (10/10 PASS)
-UI          ████████████████████████░░░░░░   84%  (11/13 PASS)
-API         ████████████████████████░░░░░░   80%  (8/10 PASS)
-Negative    ████████████████████░░░░░░░░░░   64%  (7/11 PASS)
-Security    ████████████████░░░░░░░░░░░░░░   56%  (5/9 PASS)
-Performance ████████████████████████░░░░░░   80%  (8/10 PASS)
-            0%                          100%
+Functional  ████████████████████████████████  100%  (12/12)
+RAG         ████████████████████████████████  100%  (8/8)
+API         ████████████████████████████████  100%  (8/8)
+UI          █████████████████████░░░░░░░░░░░   67%  (8/12)
+Performance █████████████████████████░░░░░░░   71%  (5/7)
+Negative    ████████████████████░░░░░░░░░░░░   60%  (6/10)
+Security    ████████████████░░░░░░░░░░░░░░░░   50%  (3/6)
+            0%                            100%
 ```
+
+---
+
+## Perbandingan v1.0 vs v2.0
+
+| Kategori | v1.0 Rate | v2.0 Rate | Trend |
+|----------|-----------|-----------|-------|
+| Functional | 100% | 100% | ➡️ Stabil |
+| UI | 84.6% | 66.7% | ⬇️ Turun (fitur baru) |
+| API | 80% | 100% | ⬆️ Naik |
+| Negative | 63.6% | 60% | ➡️ Stabil |
+| Security | 55.6% | 50% | ⬇️ Slight (new risks) |
+| Performance | 80% | 71.4% | ⬇️ Sedikit (overhead) |
+| **Overall** | **77.8%** | **79.4%** | ⬆️ **Naik** |
 
 ---
 
 ## Bug Summary
 
-| ID | Title | Severity | Status |
-|----|-------|----------|--------|
-| Bug-001 | Missing .gitignore | 🔴 Critical | Open |
-| Bug-002 | No input validation in llm.py | 🟠 High | Open |
-| Bug-003 | Dark mode CSS override | 🟡 Medium | Open |
-| Bug-004 | Rate limit error not user-friendly | 🟠 High | Open |
-| Bug-005 | Unbounded history growth | 🟠 High | Open |
-| ST-005 | No prompt injection defense | 🔴 Critical | Open |
-| UT-010 | Mobile sidebar overlap | 🟡 Medium | Open |
-| AT-007 | No rate limit retry | 🟠 High | Open |
-| NT-011 | Reset race condition | 🟡 Medium | Open |
-| AT-010 | History token growth latency | 🟠 High | Open |
-
-**Total Bugs: 10** | Critical: 2 | High: 5 | Medium: 3
-
----
-
-## Test Environment
-
-| Item | Value |
-|------|-------|
-| Python | 3.11.4 |
-| Streamlit | 1.32.0 |
-| groq SDK | 0.9.0 |
-| OS | Ubuntu 22.04 LTS |
-| Model | openai/gpt-oss-120b |
-| Test Duration | 2025-06-30 to 2025-07-01 |
-
----
-
-## Pass/Fail Trend
-
 ```
-100% ●─────────────────────────────●
-                                    \
- 80%                         ●───────●──────●
-                            /
- 64%                  ●────●
-                      |
- 56%             ●────●
-      |           |    |    |    |    |
-    Func        API  Perf  UI  Neg  Sec
+● Bug-006 [CRITICAL] requests tidak di requirements.txt
+● Bug-007 [HIGH]     Tidak ada validasi ukuran file
+● Bug-008 [HIGH]     Orphaned user message (stream disconnect)
+● Bug-002 [HIGH]     No input validation di llm.py     (carry-over v1.0)
+● Bug-004 [HIGH]     Rate limit tidak user-friendly     (carry-over v1.0)
+● Bug-005 [HIGH]     History token growth              (partial v1.0)
+● Bug-003 [MEDIUM]   Dark mode CSS                     (carry-over v1.0)
+● Bug-009 [MEDIUM]   Session pipeline memory leak
+● Bug-010 [MEDIUM]   File clear → session reset
 ```
+
+**Total Aktif: 9** | Critical: 1 | High: 5 | Medium: 3
 
 ---
 
 ## Exit Criteria Status
 
-| Criterion | Target | Actual | Status |
-|-----------|--------|--------|--------|
-| Test Cases Executed | 100% | 100% | ✅ |
-| Overall Pass Rate | ≥85% | 77.8% | ⚠️ Below Target |
+| Kriteria | Target | Aktual | Status |
+|----------|--------|--------|--------|
+| Test Cases Dieksekusi | 100% | 100% | ✅ |
+| Overall Pass Rate | ≥ 80% | 79.4% | ⚠️ Sedikit di bawah |
 | Critical Bugs Resolved | 100% | 0% | ❌ |
 | High Bugs Resolved | 100% | 0% | ❌ |
-| All Deliverables Complete | Yes | Yes | ✅ |
+| Deliverables Lengkap | Ya | Ya | ✅ |
+| Regression Lengkap | Ya | Ya | ✅ |
 
-**Exit Criteria Status: NOT MET** — Critical bugs must be resolved before sign-off.
+**Exit Criteria: BELUM TERPENUHI** — Bug Critical harus diselesaikan.
 
 ---
 
-*QA Engineering Team — 2025-07-01*
+## Durasi Testing
+
+| Fase | Durasi (Estimasi) |
+|------|-------------------|
+| Repository Analysis | 1 hari |
+| Test Planning | 0.5 hari |
+| Test Execution (semua kategori) | 3 hari |
+| Bug Reporting | 1 hari |
+| Documentation | 1 hari |
+| **Total** | **~6.5 hari kerja** |
+
+---
+
+*QA Engineering Team — SH04-AI-Chatbot-LEXA v2.0 — 2026-07-10*

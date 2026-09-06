@@ -1,5 +1,5 @@
 import os
-from groq import Groq
+from groq import AsyncGroq
 from core.database import SessionLocal, ChatSession, UnansweredQuery
 from core.settings import SettingsManager
 
@@ -25,8 +25,8 @@ class LexaChatbot:
                 "'GROQ API KEY' sudah didefinisikan dengan benar di file .env Anda."
             )
             
-        # Inisialisasi client Groq
-        self.client = Groq(api_key=self.api_key)
+        # Inisialisasi client Groq (async)
+        self.client = AsyncGroq(api_key=self.api_key)
         self.model = model
         self.rag_pipeline = rag_pipeline
         self.max_history_turns = max_history_turns
@@ -43,25 +43,29 @@ class LexaChatbot:
     def _load_history(self):
         """Memuat riwayat chat dari database PostgreSQL."""
         db = SessionLocal()
-        session = db.query(ChatSession).filter(ChatSession.session_id == self.session_id).first()
-        if session and session.history:
-            self.history = session.history
-        else:
-            self.reset_chat(save=False)
-        db.close()
+        try:
+            session = db.query(ChatSession).filter(ChatSession.session_id == self.session_id).first()
+            if session and session.history:
+                self.history = session.history
+            else:
+                self.reset_chat(save=False)
+        finally:
+            db.close()
 
     def _save_history(self):
         """Menyimpan riwayat chat saat ini ke database PostgreSQL."""
         db = SessionLocal()
-        session = db.query(ChatSession).filter(ChatSession.session_id == self.session_id).first()
-        if not session:
-            session = ChatSession(session_id=self.session_id, history=self.history)
-            db.add(session)
-        else:
-            # Tetapkan list baru agar SQLAlchemy mendeteksi perubahan JSON
-            session.history = list(self.history)
-        db.commit()
-        db.close()
+        try:
+            session = db.query(ChatSession).filter(ChatSession.session_id == self.session_id).first()
+            if not session:
+                session = ChatSession(session_id=self.session_id, history=self.history)
+                db.add(session)
+            else:
+                # Tetapkan list baru agar SQLAlchemy mendeteksi perubahan JSON
+                session.history = list(self.history)
+            db.commit()
+        finally:
+            db.close()
 
     def reset_chat(self, save=True):
         """Mengosongkan riwayat percakapan dan menetapkan ulang System Prompt."""
@@ -82,10 +86,12 @@ class LexaChatbot:
     def _log_unanswered_query(self, message: str):
         """Mencatat pertanyaan yang tidak ditemukan di RAG ke database."""
         db = SessionLocal()
-        query = UnansweredQuery(session_id=self.session_id, user_query=message)
-        db.add(query)
-        db.commit()
-        db.close()
+        try:
+            query = UnansweredQuery(session_id=self.session_id, user_query=message)
+            db.add(query)
+            db.commit()
+        finally:
+            db.close()
 
     def _prepare_messages(self, message: str) -> list:
         """
@@ -133,7 +139,7 @@ class LexaChatbot:
             
         return messages_to_send
 
-    def send_message(self, message: str) -> str:
+    async def send_message(self, message: str) -> str:
         """
         Mengirim pesan ke Groq API dan menyimpan percakapan ke dalam riwayat.
         Mengembalikan jawaban model dalam bentuk string utuh.
@@ -143,7 +149,7 @@ class LexaChatbot:
         messages_to_send = self._prepare_messages(message)
         
         try:
-            chat_completion = self.client.chat.completions.create(
+            chat_completion = await self.client.chat.completions.create(
                 messages=messages_to_send,
                 model=self.model,
             )
@@ -156,11 +162,12 @@ class LexaChatbot:
             
         except Exception as e:
             # Jika gagal, hapus pesan terakhir user agar history tetap sinkron
-            self.history.pop()
-            self._save_history()
+            if self.history and self.history[-1]["role"] == "user":
+                self.history.pop()
+                self._save_history()
             raise RuntimeError(f"Gagal memproses request ke Groq API: {e}")
 
-    def send_message_stream(self, message: str):
+    async def send_message_stream(self, message: str):
         """
         Mengirim pesan ke Groq API dan menghasilkan (yield) jawaban per kata/token
         secara streaming (real-time). Cocok untuk antarmuka chat yang interaktif.
@@ -170,14 +177,14 @@ class LexaChatbot:
         messages_to_send = self._prepare_messages(message)
         
         try:
-            stream = self.client.chat.completions.create(
+            stream = await self.client.chat.completions.create(
                 messages=messages_to_send,
                 model=self.model,
                 stream=True
             )
             
             full_reply = ""
-            for chunk in stream:
+            async for chunk in stream:
                 content = chunk.choices[0].delta.content or ""
                 full_reply += content
                 yield content
@@ -187,6 +194,7 @@ class LexaChatbot:
             self._trim_history()
             
         except Exception as e:
-            self.history.pop()
-            self._save_history()
+            if self.history and self.history[-1]["role"] == "user":
+                self.history.pop()
+                self._save_history()
             raise RuntimeError(f"Gagal memproses stream request ke Groq API: {e}")

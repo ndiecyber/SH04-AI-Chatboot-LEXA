@@ -38,12 +38,11 @@ const Dashboard = () => {
     icon: React.ComponentType<{ className?: string }>;
     color: string;
     bg: string;
-    isUptime?: boolean;
   }> = [
     { title: 'Total Conversations', value: stats.total_conversations.toLocaleString(), trend: 'Real-time', trendUp: true, icon: MessageSquare, color: 'text-purple-600', bg: 'bg-purple-100' },
-    { title: 'Unanswered Queries', value: stats.unanswered_queries.toLocaleString(), trend: 'Real-time', trendUp: true, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100' },
-    { title: 'Active Users', value: stats.active_users.toLocaleString(), trend: 'Real-time', trendUp: true, icon: Users, color: 'text-green-600', bg: 'bg-green-100' },
-    { title: 'System Uptime', value: '99.9%', trend: 'All systems operational', trendUp: true, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-100', isUptime: true },
+    { title: 'Unanswered Queries', value: stats.unanswered_queries.toLocaleString(), trend: 'Real-time', trendUp: false, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100' },
+    { title: 'Active Users (30m)', value: stats.active_users.toLocaleString(), trend: 'Real-time', trendUp: true, icon: Users, color: 'text-green-600', bg: 'bg-green-100' },
+    { title: 'Resolution Rate', value: stats.total_conversations > 0 ? `${((1 - stats.unanswered_queries / Math.max(stats.total_conversations, 1)) * 100).toFixed(1)}%` : '—', trend: 'vs total', trendUp: true, icon: Activity, color: 'text-blue-600', bg: 'bg-blue-100' },
   ];
   
   return (
@@ -66,10 +65,16 @@ const Dashboard = () => {
               Pantau performa chatbot CS Anda, analisis pertanyaan yang belum terjawab, dan perbarui basis pengetahuan secara instan.
             </p>
             <div className="flex gap-4 pt-2">
-              <button className="px-5 py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-xl transition-colors shadow-lg shadow-blue-500/30 flex items-center gap-2">
+              <button
+                onClick={() => window.location.href = '/kb'}
+                className="px-5 py-2.5 bg-blue-500 hover:bg-blue-400 text-white font-medium rounded-xl transition-colors shadow-lg shadow-blue-500/30 flex items-center gap-2"
+              >
                 <Plus className="w-4 h-4" /> Sync Knowledge Base
               </button>
-              <button className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white font-medium rounded-xl transition-colors border border-white/20 flex items-center gap-2">
+              <button
+                onClick={() => window.location.href = '/analytics'}
+                className="px-5 py-2.5 bg-white/10 hover:bg-white/20 text-white font-medium rounded-xl transition-colors border border-white/20 flex items-center gap-2"
+              >
                 <FileText className="w-4 h-4" /> Lihat Laporan
               </button>
             </div>
@@ -99,12 +104,9 @@ const Dashboard = () => {
               </div>
             </div>
             <div className="mt-4 flex items-center gap-2 text-sm">
-              {!kpi.isUptime && (
-                <span className={kpi.trendUp ? 'text-green-500 font-medium' : 'text-red-500 font-medium'}>
-                  {kpi.trend}
-                </span>
-              )}
-              <span className="text-slate-400">{kpi.isUptime ? kpi.trend : 'vs last month'}</span>
+              <span className={kpi.trendUp ? 'text-green-500 font-medium' : 'text-red-500 font-medium'}>
+                {kpi.trend}
+              </span>
             </div>
           </div>
         ))}
@@ -115,10 +117,7 @@ const Dashboard = () => {
         <div className="lg:col-span-2 bg-white rounded-2xl p-6 shadow-[0_2px_10px_0_rgba(0,0,0,0.02)] border border-slate-100">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-slate-800 text-lg">Statistik Percakapan</h3>
-            <select className="bg-slate-50 border border-slate-200 text-sm rounded-lg px-3 py-1.5 outline-none text-slate-600">
-              <option>This Month</option>
-              <option>Last Month</option>
-            </select>
+            <span className="text-xs text-slate-400 font-medium">7 Hari Terakhir</span>
           </div>
           <div className="h-[300px] w-full">
             <ResponsiveContainer width="100%" height="100%">

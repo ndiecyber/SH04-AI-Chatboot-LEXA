@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, ChangeEvent, KeyboardEvent } from 'react';
-import { Search, User, Clock, MessageSquare, AlertCircle, Send, ShieldAlert, Bot } from 'lucide-react';
+import { Search, User, Clock, MessageSquare, AlertCircle, Send, ShieldAlert, Bot, Headphones, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import api from '../lib/apiClient';
@@ -13,20 +13,30 @@ interface SSEEvent {
   references?: Array<{ title: string; source: string; score: number }>;
 }
 
+interface HandoffNotification {
+  session_id: string;
+  user_name: string;
+  timestamp: number;
+}
+
 const Conversations = () => {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [selectedSession, setSelectedSession] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<SessionHistory | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [handoffNotifications, setHandoffNotifications] = useState<HandoffNotification[]>([]);
   const [replyText, setReplyText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isUserTyping, setIsUserTyping] = useState(false);
+  const wsRef = useRef<WebSocket | null>(null);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Fetch session list
   const fetchSessions = () => {
-    api.authGet<ChatSession[]>('/api/admin/sessions')
+    api.authGet<{ items: ChatSession[]; total: number }>('/api/admin/sessions?limit=100')
       .then(data => {
-        setSessions(data);
+        setSessions(data.items);
         setIsLoading(false);
       })
       .catch(err => {
@@ -37,8 +47,46 @@ const Conversations = () => {
 
   useEffect(() => {
     fetchSessions();
-    const interval = setInterval(fetchSessions, 5000);
-    return () => clearInterval(interval);
+  }, []);
+
+  // Admin WebSocket for handoff notifications
+  useEffect(() => {
+    let reconnectTimeout: ReturnType<typeof setTimeout>;
+    
+    const connectAdminWs = () => {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsHost = window.location.host;
+      const wsToken = localStorage.getItem('lexa_admin_token') || '';
+      const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/admin?token=${wsToken}`);
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'handoff_request' || data.type === 'new_message') {
+            if (data.type === 'handoff_request') {
+              setHandoffNotifications(prev => [...prev, {
+                session_id: data.session_id,
+                user_name: data.user_name,
+                timestamp: data.timestamp,
+              }]);
+            }
+            fetchSessions();
+          }
+        } catch (e) {
+          console.error('WebSocket message parse error:', e);
+        }
+      };
+
+      ws.onclose = () => {
+        reconnectTimeout = setTimeout(connectAdminWs, 3000);
+      };
+    };
+
+    connectAdminWs();
+
+    return () => {
+      clearTimeout(reconnectTimeout);
+    };
   }, []);
 
   // Fetch specific session history
@@ -61,6 +109,7 @@ const Conversations = () => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.host;
     const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/chat/${selectedSession}`);
+    wsRef.current = ws;
     
     ws.onmessage = (event) => {
         try {
@@ -69,12 +118,18 @@ const Conversations = () => {
                 if (data.type !== 'chunk') {
                     loadSessionHistory(selectedSession);
                 }
+                if (data.type === 'done') {
+                    setIsUserTyping(false);
+                }
+            } else if (data.type === 'typing') {
+                setIsUserTyping(true);
             }
         } catch(e) {}
     };
 
     return () => {
-        ws.close();
+      ws.close();
+      wsRef.current = null;
     };
   }, [selectedSession]);
 
@@ -86,6 +141,10 @@ const Conversations = () => {
       setSessionData(prev => prev ? {...prev, is_human_handoff: newState} : null);
     })
     .catch(err => console.error("Error toggling handoff:", err));
+  };
+
+  const dismissNotification = (sessionId: string) => {
+    setHandoffNotifications(prev => prev.filter(n => n.session_id !== sessionId));
   };
 
   const handleSendReply = () => {
@@ -101,9 +160,42 @@ const Conversations = () => {
   };
 
   return (
-    <div className="h-[calc(100vh-140px)] flex bg-white rounded-2xl shadow-[0_2px_10px_0_rgba(0,0,0,0.02)] border border-slate-100 overflow-hidden">
+    <div className="h-[calc(100vh-140px)] flex flex-col bg-white rounded-2xl shadow-[0_2px_10px_0_rgba(0,0,0,0.02)] border border-slate-100 overflow-hidden">
       
-      {/* Left Pane: Session List */}
+      {/* Handoff Notifications */}
+      {handoffNotifications.map((notif) => (
+        <div
+          key={notif.session_id}
+          className="bg-amber-50 border-b border-amber-200 px-4 py-3 flex items-center gap-3 animate-[slideDown_0.3s_ease-out]"
+        >
+          <Headphones className="w-5 h-5 text-amber-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-amber-800">
+              {notif.user_name} meminta obrolan dengan CS manusia
+            </p>
+            <p className="text-xs text-amber-600">
+              Sesi: {notif.session_id.substring(0, 8)}...
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              setSelectedSession(notif.session_id);
+              dismissNotification(notif.session_id);
+            }}
+            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-medium rounded-lg transition-colors"
+          >
+            Lihat
+          </button>
+          <button
+            onClick={() => dismissNotification(notif.session_id)}
+            className="p-1 text-amber-400 hover:text-amber-600 transition-colors"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      ))}
+
+      {/* Main Content */}
       <div className="w-1/3 border-r border-slate-100 flex flex-col bg-slate-50/50">
         <div className="p-4 border-b border-slate-100">
           <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
@@ -114,19 +206,28 @@ const Conversations = () => {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
             <input 
               type="text" 
-              placeholder="Cari ID Sesi..." 
+              placeholder="Cari ID Sesi atau pesan..." 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-white border border-slate-200 text-sm rounded-lg py-2 pl-9 pr-3 focus:outline-none focus:border-blue-500"
             />
           </div>
         </div>
         
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        <div className="flex-1 overflow-y-auto scrollbar-hidden p-2 space-y-1">
           {isLoading ? (
             <div className="p-4 text-center text-sm text-slate-500 animate-pulse">Loading sessions...</div>
           ) : sessions.length === 0 ? (
             <div className="p-4 text-center text-sm text-slate-500">Belum ada percakapan.</div>
           ) : (
-            sessions.map((s) => (
+            sessions
+              .filter(s => {
+                if (!searchQuery.trim()) return true;
+                const q = searchQuery.toLowerCase();
+                return s.session_id.toLowerCase().includes(q) ||
+                       (s.last_message && s.last_message.toLowerCase().includes(q));
+              })
+              .map((s) => (
               <button 
                 key={s.session_id}
                 onClick={() => setSelectedSession(s.session_id)}
@@ -170,7 +271,7 @@ const Conversations = () => {
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-slate-50/30">
+            <div className="flex-1 overflow-y-auto scrollbar-hidden p-6 space-y-6 bg-slate-50/30">
               {!sessionData ? (
                 <div className="h-full flex items-center justify-center text-slate-400 text-sm">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -214,10 +315,20 @@ const Conversations = () => {
             {/* Input Area (Only visible if Handoff is true) */}
             {sessionData?.is_human_handoff ? (
               <div className="p-4 border-t border-slate-100 bg-white">
+                {isUserTyping && (
+                  <div className="text-xs text-blue-500 mb-2 font-medium animate-pulse">
+                    Pelanggan sedang mengetik...
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <textarea 
                     value={replyText}
-                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setReplyText(e.target.value)}
+                    onChange={(e: ChangeEvent<HTMLTextAreaElement>) => {
+                      setReplyText(e.target.value);
+                      if (wsRef.current?.readyState === WebSocket.OPEN) {
+                        wsRef.current.send(JSON.stringify({ type: 'typing', role: 'admin' }));
+                      }
+                    }}
                     onKeyDown={(e: KeyboardEvent<HTMLTextAreaElement>) => {
                       if(e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();

@@ -12,4 +12,4 @@ def get_forwarded_for():
         return get_remote_address(request)
     return _get_remote_address
 
-limiter = Limiter(key_func=get_forwarded_for)
+limiter = Limiter(key_func=get_forwarded_for())

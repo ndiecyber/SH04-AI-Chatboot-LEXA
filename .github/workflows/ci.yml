@@ -46,6 +46,20 @@ jobs:
   backend:
     name: Backend API
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_DB: lexa_db_test
+          POSTGRES_USER: lexa_test
+          POSTGRES_PASSWORD: lexa_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -55,3 +69,8 @@ jobs:
       - run: python -c "from core.config import Config; print('Config OK')"
       - run: python -c "from core.database import get_db; print('Database OK')"
       - run: python -c "from core.rag import RAGPipeline; print('RAG OK')"
+      - run: python -m pytest tests/ -v
+        env:
+          DATABASE_URL: postgresql://lexa_test:lexa_test@localhost:5432/lexa_db_test
+          JWT_SECRET: ci-test-secret-key
+          GROQ_API_KEY: dummy

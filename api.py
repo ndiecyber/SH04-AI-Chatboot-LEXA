@@ -10,6 +10,8 @@ Jalankan:
 
 import sys
 import os
+import logging
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -25,6 +27,14 @@ from core.database import seed_default_admin
 import core.state as state
 
 from routers import auth, chat, admin, widget
+
+logger = logging.getLogger("lexa")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 
 # ──────────────────────────────────────────────
@@ -43,8 +53,8 @@ async def lifespan(app: FastAPI):
     # Seed default admin jika belum ada
     seed_default_admin()
 
-    print("[STARTUP] Memulai Lexa API Server...")
-    print("[STARTUP] Memuat basis pengetahuan RAG...")
+    logger.info("Memulai Lexa API Server...")
+    logger.info("Memuat basis pengetahuan RAG...")
 
     state.rag_pipeline = RAGPipeline(
         db_dir=Config.KNOWLEDGE_BASE_DIR,
@@ -52,12 +62,25 @@ async def lifespan(app: FastAPI):
         kb_url=Config.KNOWLEDGE_BASE_URL,
     )
     state.rag_pipeline.load_or_build()
-    print("[STARTUP] RAG Pipeline siap.")
+    logger.info("RAG Pipeline siap.")
+
+    # Background task: cleanup expired sessions setiap 5 menit
+    async def periodic_cleanup():
+        while True:
+            await asyncio.sleep(300)
+            state.cleanup_old_sessions()
+
+    cleanup_task = asyncio.create_task(periodic_cleanup())
 
     yield
 
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
     state.chat_sessions.clear()
-    print("[SHUTDOWN] Lexa API Server dihentikan.")
+    logger.info("Lexa API Server dihentikan.")
 
 
 # ──────────────────────────────────────────────
@@ -87,7 +110,7 @@ app.add_middleware(
 if os.path.exists("frontend/dist"):
     app.mount("/widget", StaticFiles(directory="frontend/dist"), name="widget")
 else:
-    print("[WARNING] frontend/dist tidak ditemukan. Widget tidak akan disediakan.")
+    logger.warning("frontend/dist tidak ditemukan. Widget tidak akan disediakan.")
 
 # ──────────────────────────────────────────────
 # Include Routers
@@ -110,6 +133,31 @@ async def health_check():
         "rag_loaded": state.rag_pipeline is not None,
         "active_sessions": len(state.chat_sessions),
     }
+
+
+@app.websocket("/ws/admin")
+async def admin_websocket(websocket, token: str = ""):
+    import jwt as pyjwt
+    from core.auth import JWT_SECRET, JWT_ALGORITHM
+
+    if not token:
+        await websocket.close(code=4001, reason="Token required")
+        return
+    try:
+        pyjwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except pyjwt.ExpiredSignatureError:
+        await websocket.close(code=4001, reason="Token expired")
+        return
+    except pyjwt.InvalidTokenError:
+        await websocket.close(code=4001, reason="Invalid token")
+        return
+
+    await state.manager.connect_admin(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except Exception:
+        state.manager.disconnect_admin(websocket)
 
 
 # ──────────────────────────────────────────────

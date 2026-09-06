@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Send, Minus, RotateCcw, GripHorizontal } from 'lucide-react';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Send, Minus, RotateCcw, GripHorizontal, Headphones } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,7 +13,9 @@ interface ChatMessage extends Message {
 
 type ExtendedSSEEvent = SSEEvent | 
   { type: 'admin_reply'; content: string } | 
-  { type: 'handoff_user_msg'; content: string };
+  { type: 'handoff_user_msg'; content: string } |
+  { type: 'handoff_requested' } |
+  { type: 'typing' };
 
 function App() {
   const [isOpen, setIsOpen] = useState(false);
@@ -21,10 +23,12 @@ function App() {
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaitingForResponse, setIsWaitingForResponse] = useState(false);
+  const [isAdminTyping, setIsAdminTyping] = useState(false);
   const [sessionId, setSessionId] = useState(() => localStorage.getItem('lexa_session_id') || '');
   const [config, setConfig] = useState<WidgetConfig | null>(null);
   const [escalationShown, setEscalationShown] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isHandoffRequested, setIsHandoffRequested] = useState(false);
   
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -32,7 +36,12 @@ function App() {
 
   // Initialize & fetch config
   useEffect(() => {
-    const savedMessages = JSON.parse(localStorage.getItem('lexa_messages') || '[]') as ChatMessage[];
+    let savedMessages: ChatMessage[] = [];
+    try {
+      savedMessages = JSON.parse(localStorage.getItem('lexa_messages') || '[]') as ChatMessage[];
+    } catch {
+      savedMessages = [];
+    }
     setMessages(savedMessages);
 
     api.get<WidgetConfig>('/config')
@@ -62,56 +71,87 @@ function App() {
 
 
   // WebSocket connection for real-time sync (replaces polling)
-  useEffect(() => {
-    if (!sessionId || isStreaming || isWaitingForResponse) return;
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+
+  const connectWebSocket = useCallback(() => {
+    if (!sessionId) return;
     
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsHost = window.location.host;
     const ws = new WebSocket(`${wsProtocol}//${wsHost}/ws/chat/${sessionId}`);
-    
+    wsRef.current = ws;
+
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as ExtendedSSEEvent;
-        if (data.type === 'admin_reply' || data.type === 'handoff_user_msg' || data.type === 'done' || data.type === 'chunk') {
-          // Update messages when relevant new messages arrive
-          if (data.type !== 'chunk') {
-            // Fetch latest history from API
-            api.get<{ history: Array<{ role: string; content: string; timestamp?: number }> }>(`/api/chat/poll?session_id=${sessionId}&t=${Date.now()}`, { cache: "no-store", headers: { 'Pragma': 'no-cache' } })
-              .then((data: { history: Array<{ role: string; content: string; timestamp?: number }> }) => {
-                if (data.history && data.history.length > 0) {
-                  const mappedHistory = data.history.map((m, i) => ({
-                    id: m.timestamp || Date.now() + i,
-                    role: m.role === 'assistant' ? 'bot' : m.role,
-                    content: m.content,
-                    timestamp: m.timestamp || Date.now()
-                  })) as ChatMessage[];
-                  
-                  setMessages(prev => {
-                    const welcomeMsg = prev.length > 0 && prev[0].role === 'bot' && (!data.history.length || prev[0].content !== data.history[0].content) ? prev[0] : null;
-                    const newMsgs = welcomeMsg ? [welcomeMsg, ...mappedHistory] : mappedHistory;
-                    
-                    const strip = (msgs: ChatMessage[]) => JSON.stringify(msgs.map(m => ({role: m.role, content: m.content})));
-                    if (strip(prev) !== strip(newMsgs)) {
-                      return newMsgs;
-                    }
-                    return prev;
-                  });
-                }
-              })
-              .catch(err => console.error("WebSocket poll error", err));
+        if (data.type === 'admin_reply' || data.type === 'handoff_user_msg') {
+          api.get<{ history: Array<{ role: string; content: string; timestamp?: number }> }>(`/api/chat/poll?session_id=${sessionId}&t=${Date.now()}`)
+            .then((pollData) => {
+              if (pollData.history && pollData.history.length > 0) {
+                const mappedHistory = pollData.history.map((m, i) => ({
+                  id: m.timestamp || Date.now() + i,
+                  role: m.role === 'assistant' ? 'bot' : m.role,
+                  content: m.content,
+                  timestamp: m.timestamp || Date.now()
+                })) as ChatMessage[];
+                setMessages(prev => {
+                  const welcomeMsg = prev.length > 0 && prev[0].role === 'bot' ? prev[0] : null;
+                  const newMsgs = welcomeMsg ? [welcomeMsg, ...mappedHistory] : mappedHistory;
+                  const strip = (msgs: ChatMessage[]) => JSON.stringify(msgs.map(m => ({role: m.role, content: m.content})));
+                  return strip(prev) !== strip(newMsgs) ? newMsgs : prev;
+                });
+              }
+            })
+            .catch(() => {});
+        } else if (data.type === 'handoff_requested') {
+          setIsHandoffRequested(true);
+        } else if (data.type === 'typing') {
+          if (data.role === 'admin') {
+            setIsAdminTyping(true);
+          } else {
+            setIsWaitingForResponse(true);
           }
+        } else if (data.type === 'done') {
+          api.get<{ history: Array<{ role: string; content: string; timestamp?: number }> }>(`/api/chat/poll?session_id=${sessionId}&t=${Date.now()}`)
+            .then((pollData) => {
+              if (pollData.history && pollData.history.length > 0) {
+                const mappedHistory = pollData.history.map((m, i) => ({
+                  id: m.timestamp || Date.now() + i,
+                  role: m.role === 'assistant' ? 'bot' : m.role,
+                  content: m.content,
+                  timestamp: m.timestamp || Date.now()
+                })) as ChatMessage[];
+                setMessages(prev => {
+                  const welcomeMsg = prev.length > 0 && prev[0].role === 'bot' ? prev[0] : null;
+                  const newMsgs = welcomeMsg ? [welcomeMsg, ...mappedHistory] : mappedHistory;
+                  const strip = (msgs: ChatMessage[]) => JSON.stringify(msgs.map(m => ({role: m.role, content: m.content})));
+                  return strip(prev) !== strip(newMsgs) ? newMsgs : prev;
+                });
+              }
+            })
+            .catch(() => {});
+          setIsWaitingForResponse(false);
         }
-      } catch (e) {}
+      } catch (e) {
+        console.error('WebSocket message parse error:', e);
+      }
     };
-    
+
     ws.onclose = () => {
-      console.log("WebSocket disconnected, will reconnect on next message");
+      reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
     };
-    
+
+    ws.onerror = () => {};
+  }, [sessionId]);
+
+  useEffect(() => {
+    connectWebSocket();
     return () => {
-      ws.close();
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      wsRef.current?.close();
     };
-  }, [sessionId, isStreaming, isWaitingForResponse]);
+  }, [connectWebSocket]);
 
   // Auto scroll
   useEffect(() => {
@@ -205,7 +245,9 @@ const reader = response.body?.getReader();
     if (sessionId) {
       try {
         await api.post(`/chat/reset?session_id=${sessionId}`);
-      } catch (e) {}
+      } catch (e) {
+        console.error('WebSocket message parse error:', e);
+      }
     }
     
     setSessionId('');
@@ -222,6 +264,18 @@ const reader = response.body?.getReader();
         }
         setIsRefreshing(false);
     }, 600); // efek jeda animasi
+  };
+
+  const handleRequestHandoff = () => {
+    if (!sessionId || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({ type: 'handoff_request', user_name: 'Customer' }));
+    setIsHandoffRequested(true);
+    setMessages(prev => [...prev, {
+      id: Date.now(),
+      role: 'bot',
+      content: 'Permintaan obrolan dengan CS manusia sudah dikirim. Mohon tunggu sebentar...',
+      timestamp: Date.now()
+    }]);
   };
 
   const showQuickReplies = config?.quick_replies && messages.length <= 2 && !isStreaming && !isWaitingForResponse && window.innerWidth > 480;
@@ -259,7 +313,7 @@ const reader = response.body?.getReader();
             exit={{ opacity: 0, y: 30, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 350, damping: 25 }}
             style={{ position: 'absolute', bottom: '24px', right: '24px' }}
-            className="w-[380px] h-[640px] min-w-[320px] min-h-[400px] max-w-[90vw] max-h-[calc(100vh-100px)] resize overflow-hidden bg-white/95 backdrop-blur-xl rounded-[24px] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-200/50 flex flex-col pointer-events-auto overflow-hidden"
+            className="w-[380px] h-[640px] min-w-[320px] min-h-[400px] max-w-[90vw] max-h-[calc(100vh-100px)] resize overflow-hidden bg-white/95 backdrop-blur-xl rounded-[24px] shadow-[0_20px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-200/50 flex flex-col pointer-events-auto"
           >
             {/* Header (Drag Handle) */}
             <div className="cursor-grab active:cursor-grabbing flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-white/80 shrink-0 z-10 relative">
@@ -288,7 +342,7 @@ const reader = response.body?.getReader();
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-5 space-y-6 bg-slate-50/50 scroll-smooth relative">
+            <div className="flex-1 overflow-y-auto scrollbar-hidden p-5 space-y-6 bg-slate-50/50 scroll-smooth relative">
               <AnimatePresence>
                 {messages.map((msg, idx) => {
                   const isUser = msg.role === 'user';
@@ -330,7 +384,7 @@ const reader = response.body?.getReader();
 
               {/* Typing Indicator with Framer Motion Bounce */}
               <AnimatePresence>
-                {isWaitingForResponse && (
+                {(isWaitingForResponse || isAdminTyping) && (
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
@@ -347,6 +401,9 @@ const reader = response.body?.getReader();
                         />
                      </div>
                      <div className="flex flex-col items-start gap-1">
+                         {isAdminTyping && (
+                           <span className="text-[10px] text-amber-500 font-medium">CS Agent sedang mengetik...</span>
+                         )}
                          <div className="bg-white border border-slate-200/60 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm h-11 flex items-center justify-center">
                              <div className="flex gap-1.5 items-center">
                                  <motion.div animate={{y:[0,-4,0]}} transition={{repeat:Infinity, duration:0.6, delay:0}} className="w-1.5 h-1.5 bg-blue-400 rounded-full"></motion.div>
@@ -383,21 +440,32 @@ const reader = response.body?.getReader();
 
             {/* Escalation */}
             <AnimatePresence>
-              {escalationShown && (
+              {isHandoffRequested ? (
+                 <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="px-5 py-3 bg-blue-50/90 backdrop-blur-md border-t border-blue-200 flex items-center gap-3 shrink-0"
+                  >
+                    <Headphones className="w-5 h-5 text-blue-600 shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-xs font-semibold text-blue-800">Menunggu CS Manusia</p>
+                      <p className="text-[10px] text-blue-600">Tim kami akan segera merespon.</p>
+                    </div>
+                  </motion.div>
+              ) : escalationShown && (
                  <motion.div 
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
                     className="px-5 py-3 bg-amber-50/90 backdrop-blur-md border-t border-amber-200 flex items-center justify-between shrink-0"
                   >
-                    <span className="text-xs font-semibold text-amber-800">Butuh bantuan lebih spesifik?</span>
-                    <a 
-                       href="https://wa.me/6285320132014" 
-                       target="_blank" 
-                       rel="noreferrer"
-                       className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold uppercase tracking-wider rounded-lg shadow-sm transition-colors"
+                    <span className="text-xs font-semibold text-amber-800">Butuh bantuan manusia?</span>
+                    <button 
+                       onClick={handleRequestHandoff}
+                       className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white text-[11px] font-bold uppercase tracking-wider rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
                     >
-                       Tanya CS Manusia
-                    </a>
+                       <Headphones className="w-3.5 h-3.5" />
+                       Chat CS
+                    </button>
                   </motion.div>
               )}
             </AnimatePresence>

@@ -1,28 +1,28 @@
 import os
-from datetime import datetime, timedelta
-from functools import wraps
+import logging
+from datetime import datetime, timedelta, timezone
 
 import jwt
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-# Generate default JWT secret if not provided (for development only)
-# In production, set JWT_SECRET in .env file
-JWT_SECRET: str = os.getenv("JWT_SECRET")
-if not JWT_SECRET:
-    # Default secret for development - should be replaced in production
-    JWT_SECRET = "lexa-dev-secret-key-change-in-production"
-    print("[WARNING] JWT_SECRET not set! Using development default. Set JWT_SECRET in .env for production.")
+logger = logging.getLogger("lexa")
 
+JWT_SECRET: str = os.getenv("JWT_SECRET", "")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
+# Grace period: token expired < 7 hari masih bisa di-refresh
+REFRESH_GRACE_PERIOD_DAYS = 7
+
+if not JWT_SECRET:
+    logger.warning("JWT_SECRET not set! Using insecure dev default. Set JWT_SECRET in .env for production.")
 
 security = HTTPBearer()
 
 
 def create_jwt_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
+    expire = datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
@@ -35,6 +35,25 @@ def verify_jwt(credentials: HTTPAuthorizationCredentials = Depends(security)):
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+def decode_token_allow_expired(token: str):
+    """Decode token meskipun expired, selama masih dalam grace period."""
+    try:
+        payload = jwt.decode(
+            token,
+            JWT_SECRET,
+            algorithms=[JWT_ALGORITHM],
+            options={"verify_exp": False},
+        )
+        exp = payload.get("exp")
+        if exp:
+            exp_dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+            if datetime.now(timezone.utc) - exp_dt > timedelta(days=REFRESH_GRACE_PERIOD_DAYS):
+                return None
+        return payload
+    except jwt.InvalidTokenError:
+        return None
 
 
 def require_role(*allowed_roles):

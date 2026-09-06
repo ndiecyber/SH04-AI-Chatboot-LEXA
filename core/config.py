@@ -1,11 +1,12 @@
 import os
+from typing import Callable
 from dotenv import load_dotenv
 
 # Memuat variabel lingkungan dari file .env
 load_dotenv()
 
 
-def _getenv(key: str, default: str = "", cast: callable = str) -> str:
+def _getenv(key: str, default: str = "", cast: Callable[[str], str] = str) -> str:
     """Ambil env variable dengan casting dan default yang aman."""
     val = os.getenv(key, default)
     return cast(val) if val is not None else default
@@ -65,6 +66,13 @@ class Config:
         if not cls.CORS_ORIGINS or all(not o.strip() for o in cls.CORS_ORIGINS):
             errors.append(
                 "CORS_ORIGINS tidak valid. Tambahkan di file .env: http://localhost:5173,http://localhost:5174"
+            )
+        import os
+        jwt_secret = os.getenv("JWT_SECRET", "")
+        if not jwt_secret:
+            errors.append(
+                "JWT_SECRET belum diset. Tambahkan di file .env. "
+                "Generate: python -c \"import secrets; print(secrets.token_urlsafe(32))\""
             )
         if errors:
             raise ValueError(

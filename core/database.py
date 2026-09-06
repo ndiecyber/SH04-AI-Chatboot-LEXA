@@ -1,7 +1,13 @@
 import os
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime, JSON, Boolean, text
 from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
+
+logger = logging.getLogger("lexa")
+
+load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -31,8 +37,8 @@ class ChatSession(Base):
     session_id = Column(String, primary_key=True, index=True)
     history = Column(JSON, default=list) # Menyimpan list of dicts [{"role": "...", "content": "..."}]
     is_human_handoff = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 class AdminUser(Base):
     __tablename__ = "admin_users"
@@ -44,7 +50,7 @@ class AdminUser(Base):
     role = Column(String) # Super Admin, CS Agent, Editor (Knowledge Base)
     status = Column(String, default="Online")
     last_active = Column(String, default="Sekarang")
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 class UnansweredQuery(Base):
     __tablename__ = "unanswered_queries"
@@ -52,7 +58,7 @@ class UnansweredQuery(Base):
     id = Column(Integer, primary_key=True, index=True)
     session_id = Column(String, index=True)
     user_query = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 def get_analytics_metrics():
     """Ambil metrics real dari database untuk dashboard."""
@@ -90,14 +96,13 @@ def get_analytics_metrics():
                     avg_response_time = f"{avg_seconds/3600:.1f} jam"
         
         # Count active users (sessions aktif dalam waktu 30 menit terakhir)
-        from datetime import datetime, timedelta
-        thirty_min_ago = datetime.utcnow() - timedelta(minutes=30)
+        thirty_min_ago = datetime.now(timezone.utc) - timedelta(minutes=30)
         active_users = db.query(ChatSession).filter(
             ChatSession.updated_at >= thirty_min_ago
         ).count()
         
         # Active users bulanan
-        thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
         monthly_active = db.query(ChatSession).filter(
             ChatSession.created_at >= thirty_days_ago
         ).count()
@@ -115,32 +120,30 @@ def get_analytics_metrics():
 def get_analytics_chart_data():
     db = SessionLocal()
     try:
-        from datetime import datetime, timedelta
-        today = datetime.utcnow().date()
+        today = datetime.now(timezone.utc).date()
+        seven_days_ago = today - timedelta(days=6)
+        cutoff = datetime.combine(seven_days_ago, datetime.min.time(), tzinfo=timezone.utc)
+
         days_data = {}
-        
-        # Buat template 7 hari terakhir
         for i in range(6, -1, -1):
             d = today - timedelta(days=i)
-            # Format label, misal: '24/08'
             label = d.strftime("%d/%m")
             days_data[label] = {"name": label, "chats": 0, "percakapan": 0, "unresolved": 0}
-            
-        # Hitung session per hari
-        sessions = db.query(ChatSession).all()
+
+        # Filter 7 hari terakhir lewat SQL, group by Python
+        sessions = db.query(ChatSession).filter(ChatSession.created_at >= cutoff).all()
         for s in sessions:
             label = s.created_at.strftime("%d/%m")
             if label in days_data:
                 days_data[label]["chats"] += 1
                 days_data[label]["percakapan"] += 1
-                
-        # Hitung unanswered per hari
-        queries = db.query(UnansweredQuery).all()
+
+        queries = db.query(UnansweredQuery).filter(UnansweredQuery.created_at >= cutoff).all()
         for q in queries:
             label = q.created_at.strftime("%d/%m")
             if label in days_data:
                 days_data[label]["unresolved"] += 1
-                
+
         return list(days_data.values())
     finally:
         db.close()
@@ -153,18 +156,17 @@ def get_recent_unanswered_queries(limit: int = 5):
     finally:
         db.close()
 
-def get_all_sessions():
+def get_all_sessions(limit: int = 50, offset: int = 0):
     db = SessionLocal()
     try:
-        # Get all sessions ordered by newest updated_at
-        sessions = db.query(ChatSession).order_by(ChatSession.updated_at.desc()).all()
+        total = db.query(ChatSession).count()
+        sessions = db.query(ChatSession).order_by(ChatSession.updated_at.desc()).offset(offset).limit(limit).all()
         
         results = []
         for s in sessions:
             history = s.history or []
             last_msg = ""
             if history:
-                # Find last user message, or last bot message
                 last_msg = history[-1].get("content", "")
                 if len(last_msg) > 50:
                     last_msg = last_msg[:50] + "..."
@@ -172,10 +174,10 @@ def get_all_sessions():
             results.append({
                 "session_id": s.session_id,
                 "last_message": last_msg,
-                "created_at": s.created_at.isoformat(),
-                "updated_at": s.updated_at.isoformat()
+                "created_at": s.created_at.isoformat() if s.created_at else "",
+                "updated_at": s.updated_at.isoformat() if s.updated_at else ""
             })
-        return results
+        return {"items": results, "total": total, "limit": limit, "offset": offset}
     finally:
         db.close()
 
@@ -207,11 +209,17 @@ def set_human_handoff(session_id: str, is_handoff: bool):
     finally:
         db.close()
 
-def get_all_users():
+def get_all_users(limit: int = 50, offset: int = 0):
     db = SessionLocal()
     try:
-        users = db.query(AdminUser).all()
-        return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role, "status": u.status, "last_active": u.last_active} for u in users]
+        total = db.query(AdminUser).count()
+        users = db.query(AdminUser).offset(offset).limit(limit).all()
+        return {
+            "items": [{"id": u.id, "name": u.name, "email": u.email, "role": u.role, "status": u.status, "last_active": u.last_active} for u in users],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
     finally:
         db.close()
 
@@ -228,19 +236,26 @@ def delete_user(user_id: int):
         db.close()
 
 # Inisialisasi tabel (dan migrasi manual sederhana)
+import logging as _logging
+_db_logger = _logging.getLogger("lexa")
+
 try:
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE chat_sessions ADD COLUMN is_human_handoff BOOLEAN DEFAULT 0"))
         conn.commit()
-except Exception:
-    pass
+except Exception as e:
+    msg = str(e).lower()
+    if "duplicate column" not in msg and "already exists" not in msg:
+        _db_logger.warning(f"ALTER TABLE chat_sessions failed: {e}")
 
 try:
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE admin_users ADD COLUMN password_hash VARCHAR"))
         conn.commit()
-except Exception:
-    pass
+except Exception as e:
+    msg = str(e).lower()
+    if "duplicate column" not in msg and "already exists" not in msg:
+        _db_logger.warning(f"ALTER TABLE admin_users failed: {e}")
 
 Base.metadata.create_all(bind=engine)
 
@@ -255,8 +270,8 @@ def seed_default_admin():
             if not admin_password:
                 import secrets
                 admin_password = secrets.token_urlsafe(16)
-                print(f"[INFO] Default admin password generated. Email: {admin_email}")
-                print(f"[INFO] Save this password securely: {admin_password}")
+                logger.info(f"Default admin password generated. Email: {admin_email}")
+                logger.info(f"Save this password securely: {admin_password}")
             pwd = admin_password.encode('utf-8')
             salt = bcrypt.gensalt()
             default_pwd = bcrypt.hashpw(pwd, salt).decode('utf-8')
@@ -268,7 +283,7 @@ def seed_default_admin():
             )
             db.add(admin)
             db.commit()
-            print(f"Default admin created: {admin_email}")
+            logger.info(f"Default admin created: {admin_email}")
     finally:
         db.close()
 

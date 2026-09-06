@@ -1,6 +1,7 @@
 import os
 import shutil
 import datetime
+import logging
 
 import bcrypt
 from fastapi import APIRouter, Request, HTTPException, Depends, UploadFile, File, BackgroundTasks
@@ -8,6 +9,8 @@ from fastapi.responses import StreamingResponse
 
 from core.schemas import UserCreateRequest, AdminReplyReq
 from core.auth import verify_jwt, require_role
+
+logger = logging.getLogger("lexa")
 from core.state import rag_pipeline, manager
 from core.config import Config
 from core.settings import SettingsManager
@@ -16,6 +19,7 @@ from core.database import (
     get_analytics_metrics,
     get_recent_unanswered_queries,
     get_all_sessions,
+    get_all_users,
     get_session_history,
     AdminUser,
     SessionLocal,
@@ -69,8 +73,8 @@ async def admin_unanswered_queries(payload: dict = Depends(verify_jwt)):
 
 
 @router.get("/api/admin/sessions")
-async def admin_get_sessions(payload: dict = Depends(verify_jwt)):
-    return get_all_sessions()
+async def admin_get_sessions(payload: dict = Depends(verify_jwt), limit: int = 50, offset: int = 0):
+    return get_all_sessions(limit=limit, offset=offset)
 
 
 @router.get("/api/admin/sessions/{session_id}")
@@ -174,7 +178,7 @@ def run_rebuild():
     try:
         rag_pipeline.load_or_build(force_rebuild=True)
     except Exception as e:
-        print("Error rebuilding RAG:", e)
+        logger.error(f"Error rebuilding RAG: {e}")
 
 
 @router.post("/api/admin/kb/reindex")
@@ -188,13 +192,8 @@ async def reindex_kb(background_tasks: BackgroundTasks, payload: dict = Depends(
 
 
 @router.get("/api/admin/users")
-async def admin_get_users(payload: dict = Depends(verify_jwt)):
-    db = SessionLocal()
-    try:
-        users = db.query(AdminUser).all()
-        return [{"id": u.id, "name": u.name, "email": u.email, "role": u.role, "last_active": u.last_active} for u in users]
-    finally:
-        db.close()
+async def admin_get_users(payload: dict = Depends(verify_jwt), limit: int = 50, offset: int = 0):
+    return get_all_users(limit=limit, offset=offset)
 
 
 @router.post("/api/admin/users")
@@ -255,13 +254,14 @@ async def admin_reply(req: AdminReplyReq, payload: dict = Depends(verify_jwt)):
         if not s:
             raise HTTPException(status_code=404, detail="Session tidak ditemukan")
         new_hist = list(s.history)
-        new_hist.append({"role": "admin", "content": req.content, "timestamp": datetime.datetime.utcnow().timestamp() * 1000})
+        new_hist.append({"role": "admin", "content": req.content, "timestamp": datetime.datetime.now(datetime.timezone.utc).timestamp() * 1000})
         s.history = new_hist
         db.commit()
     except HTTPException:
         raise
     except Exception as e:
-        print("Error saving admin reply:", e)
+        logger.error(f"Error saving admin reply: {e}")
+        raise HTTPException(status_code=500, detail="Gagal menyimpan balasan")
     finally:
         db.close()
 

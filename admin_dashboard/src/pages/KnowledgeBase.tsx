@@ -81,6 +81,28 @@ const KnowledgeBase = () => {
     }
   };
 
+  const handleExport = async () => {
+    const token = localStorage.getItem('lexa_admin_token');
+    const exportApiUrl = window.__LEXA_CONFIG__?.apiUrl || window.location.origin;
+    try {
+      const res = await fetch(`${exportApiUrl}/api/admin/kb/export`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'lexa_kb_export.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert('Gagal mengunduh knowledge base.');
+    }
+  };
+
   return (
     <div className="p-6">
       <div className="mb-6">
@@ -177,7 +199,7 @@ const KnowledgeBase = () => {
 
             <div className="my-4">
               <button
-                onClick={() => window.location.href = '/api/admin/kb/export'}
+                onClick={handleExport}
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-2 shadow-md"
                 title="Download semua dokumen sebagai ZIP"
               >

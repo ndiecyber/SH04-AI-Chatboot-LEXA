@@ -17,3 +17,17 @@
     @apply transition-all duration-300 hover:-translate-y-1 hover:shadow-xl;
   }
 }
+
+/* Hidden scrollbar but keep scroll */
+.scrollbar-hidden {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}

@@ -132,7 +132,7 @@ export interface Message {
 // Unanswered
 export interface UnansweredQuery {
   id: number;
-  session_id: string;
+  session_id?: string;
   user_query: string;
   query?: string; // alias for backward compat
   created_at: string;

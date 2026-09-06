@@ -14,8 +14,8 @@ const Users = () => {
   });
 
   const fetchUsers = () => {
-    api.authGet<AdminUser[]>('/api/admin/users')
-      .then(data => setUsers(data))
+    api.authGet<{ items: AdminUser[]; total: number }>('/api/admin/users?limit=100')
+      .then(data => setUsers(data.items))
       .catch(err => console.error(err));
   };
 

@@ -1,11 +1,14 @@
 import os
 import re
 import hashlib
+import logging
 import urllib.error
 import urllib.request
 import chromadb
 from chromadb.utils import embedding_functions
 import PyPDF2
+
+logger = logging.getLogger("lexa")
 
 DEFAULT_KB_URL = "https://sh-01-company-profile.vercel.app/api/knowledge-base"
 
@@ -201,7 +204,7 @@ class RAGPipeline:
         chunks = self.chunk_text(text, file_name)
         if chunks:
             self.vector_store.add_chunks(chunks)
-            print(f"Berhasil menambahkan {len(chunks)} chunks dari dokumen sementara '{file_name}' ke memori.")
+            logger.info(f"Berhasil menambahkan {len(chunks)} chunks dari dokumen sementara '{file_name}' ke memori.")
 
 
     def fetch_remote_kb(self, url: str = None) -> str:
@@ -235,12 +238,12 @@ class RAGPipeline:
         try:
             text = self.fetch_remote_kb(url)
             self._cache_kb_text(text)
-            print(f"Basis pengetahuan berhasil diambil dari API.")
+            logger.info(f"Basis pengetahuan berhasil diambil dari API.")
         except RuntimeError as e:
             cached = self._load_cached_kb_text()
             if cached:
                 text = cached
-                print(f"Peringatan: {e}. Menggunakan cache lokal.")
+                logger.warning(f"Peringatan: {e}. Menggunakan cache lokal.")
             else:
                 raise RuntimeError(
                     f"{e} Tidak ada cache lokal. Pastikan koneksi internet aktif."
@@ -253,7 +256,7 @@ class RAGPipeline:
         self.vector_store = ChromaVectorStore(persist_directory=self.chroma_dir)
         self.vector_store.add_chunks(chunks)
         self.vector_store.save(self.index_path)
-        print(f"Indeks RAG berhasil dibuat dengan {len(chunks)} chunks dari API.")
+        logger.info(f"Indeks RAG berhasil dibuat dengan {len(chunks)} chunks dari API.")
 
     def build_index(self):
         """Membaca file lokal atau fetch dari API jika folder kosong."""
@@ -279,15 +282,15 @@ class RAGPipeline:
                         
                     all_chunks.extend(chunks)
                 except Exception as e:
-                    print(f"Gagal membaca file {file}: {e}")
+                    logger.error(f"Gagal membaca file {file}: {e}")
 
         if all_chunks:
             self.vector_store = ChromaVectorStore(persist_directory=self.chroma_dir)
             self.vector_store.add_chunks(all_chunks)
             self.vector_store.save(self.index_path)
-            print(f"Indeks berhasil dibuat dengan {len(all_chunks)} chunks dokumen lokal.")
+            logger.info(f"Indeks berhasil dibuat dengan {len(all_chunks)} chunks dokumen lokal.")
         else:
-            print("Tidak ada dokumen lokal. Mengambil basis pengetahuan dari API...")
+            logger.info("Tidak ada dokumen lokal. Mengambil basis pengetahuan dari API...")
             self.build_index_from_url()
 
     def load_or_build(self, force_rebuild=False):
@@ -296,12 +299,12 @@ class RAGPipeline:
             try:
                 # ChromaDB otomatis ter-load saat inisialisasi Client
                 if self.vector_store.collection.count() > 0:
-                    print(f"Indeks RAG berhasil dimuat dari ChromaDB ({self.vector_store.collection.count()} chunks).")
+                    logger.info(f"Indeks RAG berhasil dimuat dari ChromaDB ({self.vector_store.collection.count()} chunks).")
                 else:
-                    print("ChromaDB kosong, membangun ulang...")
+                    logger.info("ChromaDB kosong, membangun ulang...")
                     self.build_index()
             except Exception as e:
-                print(f"Gagal memuat indeks dari cache, membangun ulang: {e}")
+                logger.error(f"Gagal memuat indeks dari cache, membangun ulang: {e}")
                 self.build_index()
         else:
             self.build_index()
